@@ -1,0 +1,6 @@
+.env
+env/
+.env/
+logs
+sync.log
+
