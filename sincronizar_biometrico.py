@@ -21,7 +21,7 @@ load_dotenv()
 logger.info("🚀 Iniciando script de sincronización biométrica")
 
 DEFAULT_PORT = 4370
-SERVER_URL = "https://rhligol.gventas.net/recibir-datos-biometrico/"
+SERVER_URL = "http://186.31.35.24:8000/api/recibir-datos-biometrico/"
 
 
 def conectar_dispositivo(ip, puerto=DEFAULT_PORT, timeout=10):
@@ -47,41 +47,43 @@ def conectar_dispositivo(ip, puerto=DEFAULT_PORT, timeout=10):
 
 def obtener_registros(conn, estacion):
     logger.info(f"📄 Obteniendo registros de asistencia de la estación: {estacion}")
-    
+
     try:
         registros_biometrico = conn.get_attendance()
         logger.info(f"📥 Total registros leídos en {estacion}: {len(registros_biometrico)}")
         print(f"📥 Total registros leídos en {estacion}: {len(registros_biometrico)}")
-        
+
         if len(registros_biometrico) == 0:
             logger.warning("⚠️ No se encontraron registros en el dispositivo")
             return []
-        
+
+        usuarios_biometrico = {user.user_id: user.name for user in conn.get_users()}
         registros = []
         for i, record in enumerate(registros_biometrico):
+            nombre = usuarios_biometrico.get(record.user_id, "")
             registro = {
-                'biometrico_id': record.user_id,
-                'timestamp': record.timestamp.isoformat(),
-                'estacion': estacion
+                'user_id': record.user_id,
+                'nombre': nombre,
+                'timestamp': record.timestamp.isoformat()
             }
             registros.append(registro)
-            
-            if i < 3:  # Log solo los primeros 3 registros para no saturar
-                logger.debug(f"Registro {i+1}: ID={record.user_id}, Timestamp={record.timestamp}")
-        
+
+            if i < 3:
+                logger.debug(f"Registro {i+1}: ID={record.user_id}, Nombre={nombre}, Timestamp={record.timestamp}")
+
         if len(registros_biometrico) > 3:
             logger.debug(f"... y {len(registros_biometrico) - 3} registros más")
-            
+
         logger.info(f"✅ Procesados {len(registros)} registros correctamente")
         return registros
-        
+
     except Exception as e:
         logger.error(f"❌ Error al obtener registros: {str(e)}")
         return []
 
 
 def enviar_al_servidor(data, token=None):
-    logger.info(f"🚀 Preparando envío de {len(data.get('registros', []))} registros al servidor")
+    logger.info(f"🚀 Preparando envío de {len(data)} registros al servidor")
     logger.info(f"🌐 URL destino: {SERVER_URL}")
     
     headers = {'Content-Type': 'application/json'}
@@ -160,8 +162,7 @@ def main():
     # Procesar y enviar registros
     if registros:
         logger.info(f"📦 Preparando envío de {len(registros)} registros")
-        data = {'registros': registros, 'estacion': nombre_estacion}
-        enviar_al_servidor(data, token=token_api)
+        enviar_al_servidor(registros, token=token_api)
     else:
         logger.warning("⚠️ No se encontraron registros para enviar")
         print("⚠️ No se encontraron registros para enviar.")
