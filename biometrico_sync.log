@@ -10637,3 +10637,30 @@ Exception Value: &#x27;str&#x27; object has no attribute &#x27;get&#x27;
 2025-07-22 10:38:27,074 - INFO - ✅ Datos enviados correctamente al servidor
 2025-07-22 10:38:27,112 - INFO - ✅ Dispositivo habilitado y desconectado correctamente
 2025-07-22 10:38:27,112 - INFO - 🏁 Finalizando script de sincronización biométrica
+2025-07-30 11:12:48,676 - INFO - 🚀 Iniciando script de sincronización biométrica sin procesamiento
+2025-07-30 11:12:48,676 - INFO - 🔌 Intentando conectar al dispositivo biométrico en 192.168.0.88:4370
+2025-07-30 11:12:48,987 - INFO - ✅ Conectado y dispositivo deshabilitado temporalmente
+2025-07-30 11:12:48,988 - INFO - 📄 Obteniendo registros RAW del dispositivo...
+2025-07-30 11:12:49,121 - INFO - 📥 Registros obtenidos: 4
+2025-07-30 11:12:49,122 - INFO - 📤 Enviando 4 registros al servidor
+2025-07-30 11:12:49,202 - INFO - ✅ Envío exitoso
+2025-07-30 11:12:49,269 - INFO - 🔌 Dispositivo habilitado y desconectado correctamente
+2025-07-30 11:12:49,270 - INFO - 🏁 Finalizando script
+2025-07-30 11:18:17,717 - INFO - 🚀 Iniciando script de sincronización biométrica sin procesamiento
+2025-07-30 11:18:17,717 - INFO - 🔌 Intentando conectar al dispositivo biométrico en 192.168.0.88:4370
+2025-07-30 11:18:17,931 - INFO - ✅ Conectado y dispositivo deshabilitado temporalmente
+2025-07-30 11:18:17,931 - INFO - 📄 Obteniendo registros RAW del dispositivo...
+2025-07-30 11:18:18,044 - INFO - 📥 Registros obtenidos: 4
+2025-07-30 11:18:18,045 - INFO - 📤 Enviando 4 registros al servidor
+2025-07-30 11:18:18,126 - INFO - ✅ Envío exitoso
+2025-07-30 11:18:18,148 - INFO - 🔌 Dispositivo habilitado y desconectado correctamente
+2025-07-30 11:18:18,148 - INFO - 🏁 Finalizando script
+2025-07-30 11:27:48,274 - INFO - 🚀 Iniciando script de sincronización biométrica sin procesamiento
+2025-07-30 11:27:48,275 - INFO - 🔌 Intentando conectar al dispositivo biométrico en 192.168.0.88:4370
+2025-07-30 11:27:48,527 - INFO - ✅ Conectado y dispositivo deshabilitado temporalmente
+2025-07-30 11:27:48,528 - INFO - 📄 Obteniendo registros RAW del dispositivo...
+2025-07-30 11:27:48,697 - INFO - 📥 Registros obtenidos: 5
+2025-07-30 11:27:48,698 - INFO - 📤 Enviando 5 registros al servidor
+2025-07-30 11:27:48,891 - INFO - ✅ Envío exitoso
+2025-07-30 11:27:48,964 - INFO - 🔌 Dispositivo habilitado y desconectado correctamente
+2025-07-30 11:27:48,964 - INFO - 🏁 Finalizando script
