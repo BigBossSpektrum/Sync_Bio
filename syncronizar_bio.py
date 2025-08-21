@@ -12,79 +12,13 @@ from zk import ZK
 from datetime import datetime
 
 # ————— Configuración de logging —————
-import os
-import sys
-
-# Obtener la ruta absoluta del directorio del script
-if getattr(sys, 'frozen', False):
-    # Si está ejecutándose como EXE compilado
-    script_dir = os.path.dirname(sys.executable)
-else:
-    # Si está ejecutándose como script Python
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-
-# Configurar la ruta del archivo de log
-log_file_path = os.path.join(script_dir, 'biometrico_sync.log')
-
-# Configurar logging con rotación de archivos
-from logging.handlers import RotatingFileHandler
-
-# Crear logger personalizado
-logger = logging.getLogger('BiometricoSync')
-logger.setLevel(logging.INFO)
-
-# Limpiar handlers existentes para evitar duplicados
-logger.handlers.clear()
-
-# Handler para archivo con rotación (máximo 5 archivos de 10MB cada uno)
-file_handler = RotatingFileHandler(
-    log_file_path,
-    maxBytes=10*1024*1024,  # 10MB
-    backupCount=5,
-    encoding='utf-8'
+logging.basicConfig(
+    filename='biometrico_sync.log',
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
 )
-file_handler.setLevel(logging.INFO)
-file_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-file_handler.setFormatter(file_formatter)
-logger.addHandler(file_handler)
 
-# Handler para consola (solo si no es EXE o si está en modo debug)
-if not getattr(sys, 'frozen', False) or '--debug' in sys.argv:
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
-    console_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-    console_handler.setFormatter(console_formatter)
-    logger.addHandler(console_handler)
-
-# Configurar el logger raíz para usar nuestro logger
-logging.root = logger
-logging.basicConfig = lambda **kwargs: None  # Evitar reconfiguración
-
-logger.info("🚀 Script de sincronización biométrica iniciado")
-logger.info(f"📁 Directorio de trabajo: {script_dir}")
-logger.info(f"📄 Archivo de log: {log_file_path}")
-logger.info(f"💻 Ejecutándose como: {'EXE compilado' if getattr(sys, 'frozen', False) else 'Script Python'}")
-
-# ————— Funciones auxiliares de logging —————
-def log_info(message):
-    """Log info message"""
-    logger.info(message)
-
-def log_error(message):
-    """Log error message"""
-    logger.error(message)
-
-def log_warning(message):
-    """Log warning message"""
-    logger.warning(message)
-
-def log_debug(message):
-    """Log debug message"""
-    logger.debug(message)
-
-def log_exception(message):
-    """Log exception with traceback"""
-    logger.exception(message)
+logging.info("🚀 Script de sincronización biométrica iniciado")
 
 # ————— Configuración por defecto —————
 SERVER_URL = "http://186.31.35.24:8000/api/recibir-datos-biometrico/"
@@ -253,18 +187,14 @@ def enviar_datos(data, token=None):
 def main_cycle():
     if not config_data['IP_BIOMETRICO'] or not config_data['NOMBRE_ESTACION']:
         logging.error("❌ Configuración incompleta (falta IP o nombre de estación)")
-        logging.error(f"   IP: '{config_data['IP_BIOMETRICO']}'")
-        logging.error(f"   Estación: '{config_data['NOMBRE_ESTACION']}'")
         return
 
     logging.info(f"🚀 Iniciando ciclo de sincronización para {config_data['NOMBRE_ESTACION']}")
     logging.info(f"🎯 Objetivo: {config_data['IP_BIOMETRICO']}:{config_data['PUERTO_BIOMETRICO']}")
-    logging.info(f"📊 Estado de configuración: sync_running = {config_data['sync_running']}")
     
     # Verificar conectividad básica
     try:
         import socket
-        logging.info("🔍 Verificando conectividad TCP...")
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(5)
         result = sock.connect_ex((config_data['IP_BIOMETRICO'], config_data['PUERTO_BIOMETRICO']))
@@ -274,7 +204,6 @@ def main_cycle():
             logging.info("✅ Puerto TCP accesible")
         else:
             logging.warning(f"⚠️ Puerto TCP no responde (código: {result})")
-            logging.warning("   Esto puede indicar que el dispositivo está apagado o inaccesible")
     except Exception as net_error:
         logging.warning(f"⚠️ Error verificando conectividad: {net_error}")
 
@@ -282,10 +211,6 @@ def main_cycle():
     conn = conectar_dispositivo(config_data['IP_BIOMETRICO'], config_data['PUERTO_BIOMETRICO'])
     if not conn:
         logging.error("❌ No se pudo establecer conexión con el dispositivo")
-        logging.error("   Verifique que:")
-        logging.error("   • El dispositivo esté encendido")
-        logging.error("   • La IP y puerto sean correctos")
-        logging.error("   • No haya firewall bloqueando la conexión")
         return
 
     try:
@@ -336,73 +261,64 @@ def sync_worker():
     """Función que ejecuta la sincronización en un hilo separado"""
     logging.info("🔄 Worker de sincronización iniciado")
     
-    try:
-        # Ejecutar primer ciclo inmediatamente
-        if config_data['sync_running']:
-            try:
-                logging.info("🚀 === INICIANDO PRIMER CICLO DE SINCRONIZACIÓN AUTOMÁTICA ===")
+    # Ejecutar primer ciclo inmediatamente
+    if config_data['sync_running']:
+        try:
+            logging.info("🚀 === INICIANDO PRIMER CICLO DE SINCRONIZACIÓN ===")
+            start_time = time.time()
+            
+            main_cycle()
+            
+            end_time = time.time()
+            duration = end_time - start_time
+            logging.info(f"⏱️ Primer ciclo completado en {duration:.2f} segundos")
+        except Exception as e:
+            logging.exception(f"❌ Error en primer ciclo: {e}")
+            import traceback
+            logging.error(f"📋 Stack trace: {traceback.format_exc()}")
+    
+    # Continuar con ciclos cada 5 minutos
+    while config_data['sync_running']:
+        try:
+            logging.info("⏱️ Esperando 5 minutos para la siguiente ejecución...")
+            
+            # Dividir la espera en pequeños intervalos para poder detener el hilo
+            for i in range(300):  # 300 segundos = 5 minutos
+                if not config_data['sync_running']:
+                    logging.info("🛑 Sincronización detenida durante la espera")
+                    break
+                
+                # Log cada minuto durante la espera
+                if i > 0 and i % 60 == 0:
+                    remaining_minutes = (300 - i) // 60
+                    logging.info(f"⏳ Esperando... {remaining_minutes} minutos restantes")
+                
+                time.sleep(1)
+            
+            # Si aún está corriendo, ejecutar siguiente ciclo
+            if config_data['sync_running']:
+                logging.info("🚀 === INICIANDO NUEVO CICLO DE SINCRONIZACIÓN ===")
                 start_time = time.time()
                 
                 main_cycle()
                 
                 end_time = time.time()
                 duration = end_time - start_time
-                logging.info(f"⏱️ Primer ciclo completado en {duration:.2f} segundos")
-            except Exception as e:
-                logging.exception(f"❌ Error en primer ciclo: {e}")
-                import traceback
-                logging.error(f"📋 Stack trace: {traceback.format_exc()}")
-        
-        # Continuar con ciclos cada 5 minutos
-        cycle_count = 1
-        while config_data['sync_running']:
-            try:
-                logging.info(f"⏱️ Esperando 5 minutos para la siguiente ejecución (Ciclo #{cycle_count + 1})...")
+                logging.info(f"⏱️ Ciclo completado en {duration:.2f} segundos")
                 
-                # Dividir la espera en pequeños intervalos para poder detener el hilo
-                for i in range(300):  # 300 segundos = 5 minutos
-                    if not config_data['sync_running']:
-                        logging.info("🛑 Sincronización detenida durante la espera")
-                        break
-                    
-                    # Log cada minuto durante la espera
-                    if i > 0 and i % 60 == 0:
-                        remaining_minutes = (300 - i) // 60
-                        logging.info(f"⏳ Esperando... {remaining_minutes} minutos restantes para el ciclo #{cycle_count + 1}")
-                    
-                    time.sleep(1)
-                
-                # Si aún está corriendo, ejecutar siguiente ciclo
-                if config_data['sync_running']:
-                    cycle_count += 1
-                    logging.info(f"🚀 === INICIANDO CICLO DE SINCRONIZACIÓN #{cycle_count} ===")
-                    start_time = time.time()
-                    
-                    main_cycle()
-                    
-                    end_time = time.time()
-                    duration = end_time - start_time
-                    logging.info(f"⏱️ Ciclo #{cycle_count} completado en {duration:.2f} segundos")
-                    
-            except Exception as e:
-                logging.exception(f"❌ Error inesperado en el ciclo #{cycle_count}: {e}")
-                import traceback
-                logging.error(f"📋 Stack trace completo: {traceback.format_exc()}")
-                logging.info("⏱️ Reiniciando en 5 minutos...")
-                
-                # Esperar antes de reintentar
-                for i in range(300):
-                    if not config_data['sync_running']:
-                        break
-                    time.sleep(1)
+        except Exception as e:
+            logging.exception(f"❌ Error inesperado en el bucle principal: {e}")
+            import traceback
+            logging.error(f"📋 Stack trace completo: {traceback.format_exc()}")
+            logging.info("⏱️ Reiniciando en 5 minutos...")
+            
+            # Esperar antes de reintentar
+            for i in range(300):
+                if not config_data['sync_running']:
+                    break
+                time.sleep(1)
     
-    except Exception as fatal_error:
-        logging.exception(f"❌ Error fatal en sync_worker: {fatal_error}")
-        import traceback
-        logging.error(f"📋 Stack trace fatal: {traceback.format_exc()}")
-    
-    finally:
-        logging.info(f"🏁 Worker de sincronización finalizado (Total de ciclos ejecutados: {cycle_count})")
+    logging.info("🏁 Worker de sincronización finalizado")
 
 class SyncBioApp:
     def __init__(self, root):
@@ -513,55 +429,26 @@ class SyncBioApp:
     def setup_logging_handler(self):
         """Configura un handler personalizado para mostrar logs en la interfaz"""
         class GUILogHandler(logging.Handler):
-            def __init__(self, text_widget, app_instance):
+            def __init__(self, text_widget):
                 super().__init__()
                 self.text_widget = text_widget
-                self.app_instance = app_instance
-                self.max_lines = 200  # Máximo de líneas en la GUI
             
             def emit(self, record):
-                try:
-                    msg = self.format(record)
-                    # Programar la actualización de la interfaz en el hilo principal
-                    self.text_widget.after(0, lambda: self.append_log(msg))
-                except Exception as e:
-                    # Si hay error en GUI, al menos log al archivo
-                    logger.error(f"Error en GUILogHandler: {e}")
+                msg = self.format(record)
+                # Programar la actualización de la interfaz en el hilo principal
+                self.text_widget.after(0, lambda: self.append_log(msg))
             
             def append_log(self, msg):
-                try:
-                    # Insertar el mensaje
-                    self.text_widget.insert(tk.END, msg + '\n')
-                    self.text_widget.see(tk.END)
-                    
-                    # Limitar el número de líneas para evitar consumo excesivo de memoria
-                    lines = int(self.text_widget.index('end').split('.')[0])
-                    if lines > self.max_lines:
-                        # Eliminar las primeras 50 líneas
-                        self.text_widget.delete('1.0', '51.0')
-                        
-                    # Actualizar la ventana
-                    self.text_widget.update_idletasks()
-                    
-                except Exception as e:
-                    # Si hay error, intentar al menos mostrar en título
-                    try:
-                        self.app_instance.root.title(f"Sincronización Biométrica - Error en log: {e}")
-                    except:
-                        pass
+                self.text_widget.insert(tk.END, msg + '\n')
+                self.text_widget.see(tk.END)
+                # Limitar el número de líneas para evitar consumo excesivo de memoria
+                if int(self.text_widget.index('end').split('.')[0]) > 100:
+                    self.text_widget.delete('1.0', '10.0')
         
-        # Crear y configurar el handler GUI
-        self.gui_handler = GUILogHandler(self.log_text, self)
-        self.gui_handler.setLevel(logging.INFO)
-        gui_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-        self.gui_handler.setFormatter(gui_formatter)
-        
-        # Agregar el handler al logger
-        logger.addHandler(self.gui_handler)
-        
-        # Log inicial en la GUI
-        logger.info("🖥️ Interfaz gráfica iniciada")
-        logger.info(f"📊 Logger configurado con {len(logger.handlers)} handlers")
+        # Agregar el handler a logging
+        gui_handler = GUILogHandler(self.log_text)
+        gui_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+        logging.getLogger().addHandler(gui_handler)
     
     def quick_test(self):
         """Prueba rápida del ciclo automático (30 segundos en lugar de 5 minutos)"""
@@ -807,205 +694,84 @@ class SyncBioApp:
         if not self.validate_inputs():
             return
         
-        # Verificar si ya hay una sincronización en curso
-        if config_data['sync_running']:
-            messagebox.showwarning("Advertencia", "La sincronización ya está en ejecución")
-            return
-        
         # Actualizar configuración global
         config_data['IP_BIOMETRICO'] = self.ip_var.get().strip()
         config_data['PUERTO_BIOMETRICO'] = int(self.puerto_var.get().strip() or "4370")
         config_data['NOMBRE_ESTACION'] = self.estacion_var.get().strip()
         config_data['sync_running'] = True
         
-        # Crear y iniciar hilo de sincronización
-        try:
-            self.sync_thread = threading.Thread(target=sync_worker, daemon=True)
-            self.sync_thread.start()
-            
-            # Actualizar interfaz
-            self.start_button.config(state="disabled")
-            self.stop_button.config(state="normal")
-            self.status_var.set("Ejecutándose")
-            
-            # Iniciar watchdog para mantener la interfaz responsiva
-            self.start_watchdog()
-            
-            logging.info(f"🚀 Sincronización automática iniciada - IP: {config_data['IP_BIOMETRICO']}, "
-                        f"Puerto: {config_data['PUERTO_BIOMETRICO']}, "
-                        f"Estación: {config_data['NOMBRE_ESTACION']}")
-            
-            messagebox.showinfo("Iniciado", 
-                "Sincronización automática iniciada exitosamente.\n\n"
-                "El sistema ejecutará la sincronización cada 5 minutos.\n"
-                "Revisa el log para ver el progreso.")
-                
-        except Exception as e:
-            logging.error(f"❌ Error al iniciar sincronización: {e}")
-            config_data['sync_running'] = False
-            messagebox.showerror("Error", f"Error al iniciar la sincronización:\n{e}")
+        # Iniciar hilo de sincronización
+        self.sync_thread = threading.Thread(target=sync_worker, daemon=True)
+        self.sync_thread.start()
+        
+        # Actualizar interfaz
+        self.start_button.config(state="disabled")
+        self.stop_button.config(state="normal")
+        self.status_var.set("Ejecutándose")
+        
+        # Iniciar watchdog para mantener la interfaz responsiva
+        self.start_watchdog()
+        
+        logging.info(f"🚀 Sincronización iniciada - IP: {config_data['IP_BIOMETRICO']}, "
+                    f"Puerto: {config_data['PUERTO_BIOMETRICO']}, "
+                    f"Estación: {config_data['NOMBRE_ESTACION']}")
     
     def start_watchdog(self):
-        """Inicia un watchdog para mantener la interfaz responsiva y monitorear el hilo"""
+        """Inicia un watchdog para mantener la interfaz responsiva"""
         def watchdog():
-            try:
-                if config_data['sync_running']:
-                    # Verificar si el hilo sigue vivo
-                    if self.sync_thread and not self.sync_thread.is_alive():
-                        logging.warning("⚠️ Hilo de sincronización se detuvo inesperadamente")
-                        logging.info("🔄 Intentando reiniciar la sincronización...")
-                        
-                        # Intentar reiniciar el hilo
-                        try:
-                            self.sync_thread = threading.Thread(target=sync_worker, daemon=True)
-                            self.sync_thread.start()
-                            logging.info("✅ Hilo de sincronización reiniciado exitosamente")
-                        except Exception as restart_error:
-                            logging.error(f"❌ Error al reiniciar hilo: {restart_error}")
-                            self.stop_sync()
-                            messagebox.showerror("Error", 
-                                "El hilo de sincronización se detuvo inesperadamente y no se pudo reiniciar.\n"
-                                "Puedes intentar iniciar la sincronización nuevamente.")
-                    
-                    # Programar siguiente verificación en 30 segundos
-                    self.root.after(30000, watchdog)
-                else:
-                    logging.info("🛑 Watchdog detenido - sincronización no activa")
-                    
-            except Exception as watchdog_error:
-                logging.error(f"❌ Error en watchdog: {watchdog_error}")
-                # Programar siguiente verificación en caso de error
-                if config_data['sync_running']:
-                    self.root.after(60000, watchdog)  # Esperar más tiempo si hay error
+            if config_data['sync_running']:
+                # Actualizar estado cada 30 segundos
+                self.root.after(30000, watchdog)
+                
+                # Verificar si el hilo sigue vivo
+                if self.sync_thread and not self.sync_thread.is_alive():
+                    logging.warning("⚠️ Hilo de sincronización se detuvo inesperadamente")
+                    self.stop_sync()
         
-        # Iniciar el watchdog en 30 segundos
+        # Iniciar el watchdog
         self.root.after(30000, watchdog)
     
     def stop_sync(self):
         """Detiene la sincronización"""
-        if not config_data['sync_running']:
-            logging.info("ℹ️ La sincronización ya está detenida")
-            return
-            
-        logging.info("🛑 Deteniendo sincronización automática...")
         config_data['sync_running'] = False
         
         # Actualizar interfaz
         self.start_button.config(state="normal")
         self.stop_button.config(state="disabled")
-        self.status_var.set("Deteniendo...")
+        self.status_var.set("Detenido")
         
-        # Dar tiempo para que el hilo termine limpiamente
-        def finish_stop():
-            try:
-                if self.sync_thread and self.sync_thread.is_alive():
-                    logging.info("⏳ Esperando que termine el hilo de sincronización...")
-                    # Esperar hasta 10 segundos para que termine limpiamente
-                    for i in range(10):
-                        if not self.sync_thread.is_alive():
-                            break
-                        time.sleep(1)
-                    
-                    if self.sync_thread.is_alive():
-                        logging.warning("⚠️ El hilo no terminó en el tiempo esperado")
-                    else:
-                        logging.info("✅ Hilo de sincronización terminado correctamente")
-                
-                self.status_var.set("Detenido")
-                logging.info("🛑 Sincronización automática detenida completamente")
-                
-                messagebox.showinfo("Detenido", 
-                    "La sincronización automática ha sido detenida exitosamente.")
-                    
-            except Exception as e:
-                logging.error(f"❌ Error al detener sincronización: {e}")
-                self.status_var.set("Error al detener")
+        # Esperar un momento para que el hilo termine limpiamente
+        if self.sync_thread and self.sync_thread.is_alive():
+            logging.info("🛑 Esperando que termine el hilo de sincronización...")
+            # No hacemos join() para evitar bloquear la interfaz
         
-        # Ejecutar la finalización en un hilo separado para no bloquear la UI
-        threading.Thread(target=finish_stop, daemon=True).start()
+        logging.info("🛑 Sincronización detenida por el usuario")
     
     def on_closing(self):
         """Maneja el cierre de la aplicación"""
-        logger.info("🚪 Cerrando aplicación...")
-        
         if config_data['sync_running']:
             if messagebox.askquestion("Confirmar", "La sincronización está en ejecución. ¿Desea detenerla y salir?") == "yes":
-                logger.info("🛑 Usuario confirmó detener sincronización y salir")
                 self.stop_sync()
-                # Esperar un momento para que se detenga limpiamente
-                self.root.after(2000, self._force_close)
-            else:
-                logger.info("❌ Usuario canceló el cierre")
-                return
+                self.root.destroy()
         else:
-            self._force_close()
-    
-    def _force_close(self):
-        """Fuerza el cierre de la aplicación"""
-        try:
-            # Remover el handler GUI del logger
-            if hasattr(self, 'gui_handler') and self.gui_handler in logger.handlers:
-                logger.removeHandler(self.gui_handler)
-                logger.info("🗑️ Handler GUI removido del logger")
-            
-            logger.info("👋 Aplicación cerrada correctamente")
-            
-            # Cerrar la ventana
-            self.root.quit()
-            self.root.destroy()
-            
-        except Exception as e:
-            # Si hay error, forzar cierre
-            try:
-                logger.error(f"❌ Error al cerrar aplicación: {e}")
-            except:
-                pass
-            self.root.quit()
             self.root.destroy()
 
 # ————— Ejecución con interfaz gráfica —————
 if __name__ == '__main__':
     try:
-        logger.info("🖥️ Iniciando aplicación con interfaz gráfica")
-        logger.info(f"🐍 Python {sys.version}")
-        logger.info(f"📍 Argumentos: {sys.argv}")
-        
         root = tk.Tk()
         app = SyncBioApp(root)
         
         # Configurar el protocolo de cierre de ventana
         root.protocol("WM_DELETE_WINDOW", app.on_closing)
         
-        logger.info("🚀 Aplicación lista, iniciando loop principal")
-        
         # Ejecutar la aplicación
         root.mainloop()
         
     except KeyboardInterrupt:
-        logger.warning("⚡ Ejecución interrumpida por el usuario (Ctrl+C)")
+        logging.warning("⚡ Ejecución interrumpida por el usuario")
     except Exception as e:
-        logger.exception(f"❌ Error inesperado en la aplicación: {e}")
-        try:
-            messagebox.showerror("Error", f"Error inesperado: {e}")
-        except:
-            pass
+        logging.exception(f"❌ Error inesperado en la aplicación: {e}")
+        messagebox.showerror("Error", f"Error inesperado: {e}")
     finally:
-        try:
-            # Asegurar que se detenga la sincronización
-            if 'config_data' in globals() and config_data.get('sync_running', False):
-                logger.info("🛑 Deteniendo sincronización antes del cierre...")
-                config_data['sync_running'] = False
-            
-            logger.info("🏁 Aplicación finalizada correctamente")
-            
-            # Limpiar y cerrar handlers de logging
-            for handler in logger.handlers[:]:
-                handler.close()
-                logger.removeHandler(handler)
-                
-        except Exception as final_error:
-            # Si hay error en la limpieza final, intentar log básico
-            try:
-                print(f"Error en limpieza final: {final_error}")
-            except:
-                pass
+        logging.info("🏁 Aplicación finalizada")
