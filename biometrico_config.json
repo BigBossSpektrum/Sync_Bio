@@ -1,0 +1,8 @@
+{
+  "IP_BIOMETRICO": "192.168.10.88",
+  "PUERTO_BIOMETRICO": 4370,
+  "NOMBRE_ESTACION": "Centenario",
+  "SERVER_URL": "http://186.31.35.24:8000/api/recibir-datos-biometrico/",
+  "TOKEN_API": null,
+  "ENABLED": true
+}
