@@ -1,0 +1,24 @@
+{
+  "python_path": "",
+  "requirements_path": "",
+  "auto_detect": true,
+  "backup_logs": true,
+  "log_directory": "logs",
+  "default_timeout": 300,
+  "retry_attempts": 3,
+  "install_options": {
+    "upgrade": true,
+    "user_install": false,
+    "no_cache": false,
+    "verbose": true
+  },
+  "verification_modules": [
+    "requests",
+    "pyzk", 
+    "PIL",
+    "pystray",
+    "dotenv",
+    "pyinstaller",
+    "tkinter"
+  ]
+}

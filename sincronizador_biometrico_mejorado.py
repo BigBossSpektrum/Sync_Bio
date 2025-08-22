@@ -100,7 +100,8 @@ DEFAULT_CONFIG = {
     'NOMBRE_ESTACION': 'Centenario',
     'INTERVALO_MINUTOS': 5,
     'AUTO_START': False,
-    'MINIMIZE_TO_TRAY': True
+    'MINIMIZE_TO_TRAY': True,
+    'START_WITH_WINDOWS': False
 }
 
 # Variables globales
@@ -133,6 +134,108 @@ def save_config():
         logging.info("CONFIG: Configuracion guardada")
     except Exception as e:
         logging.error(f"ERROR: Error guardando configuracion: {e}")
+
+# ————— Funciones de inicio automático con Windows —————
+def get_app_executable_path():
+    """Obtiene la ruta del ejecutable de la aplicación"""
+    if getattr(sys, 'frozen', False):
+        # Si es un ejecutable compilado
+        return sys.executable
+    else:
+        # Si es un script de Python, usar python.exe + script
+        python_exe = sys.executable
+        script_path = os.path.abspath(__file__)
+        return f'"{python_exe}" "{script_path}"'
+
+def is_startup_enabled():
+    """Verifica si el inicio automático está habilitado en Windows"""
+    try:
+        import winreg
+        key_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
+        app_name = "SincronizadorBiometrico"
+        
+        try:
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_READ)
+            value, _ = winreg.QueryValueEx(key, app_name)
+            winreg.CloseKey(key)
+            
+            # Verificar si la ruta coincide con la aplicación actual
+            current_path = get_app_executable_path()
+            return value.strip('"') == current_path.strip('"')
+        except FileNotFoundError:
+            return False
+        except WindowsError:
+            return False
+    except ImportError:
+        logging.warning("WARNING: winreg no disponible - funcionalidad de inicio automatico limitada")
+        return False
+
+def enable_startup():
+    """Habilita el inicio automático en Windows"""
+    try:
+        import winreg
+        key_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
+        app_name = "SincronizadorBiometrico"
+        app_path = get_app_executable_path()
+        
+        # Agregar parámetro para inicio automático silencioso
+        if getattr(sys, 'frozen', False):
+            # Para ejecutable, agregar parámetro --autostart
+            app_path = f'"{app_path}" --autostart'
+        
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_WRITE)
+        winreg.SetValueEx(key, app_name, 0, winreg.REG_SZ, app_path)
+        winreg.CloseKey(key)
+        
+        logging.info("STARTUP: Inicio automatico habilitado en Windows")
+        return True
+    except ImportError:
+        logging.error("ERROR: winreg no disponible - no se puede configurar inicio automatico")
+        return False
+    except Exception as e:
+        logging.error(f"ERROR: Error habilitando inicio automatico: {e}")
+        return False
+
+def disable_startup():
+    """Deshabilita el inicio automático en Windows"""
+    try:
+        import winreg
+        key_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
+        app_name = "SincronizadorBiometrico"
+        
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_WRITE)
+        try:
+            winreg.DeleteValue(key, app_name)
+            logging.info("STARTUP: Inicio automatico deshabilitado en Windows")
+            result = True
+        except FileNotFoundError:
+            logging.info("STARTUP: Inicio automatico ya estaba deshabilitado")
+            result = True
+        finally:
+            winreg.CloseKey(key)
+        return result
+    except ImportError:
+        logging.error("ERROR: winreg no disponible - no se puede configurar inicio automatico")
+        return False
+    except Exception as e:
+        logging.error(f"ERROR: Error deshabilitando inicio automatico: {e}")
+        return False
+
+def toggle_startup(enable):
+    """Habilita o deshabilita el inicio automático"""
+    if enable:
+        success = enable_startup()
+        if success:
+            config_data['START_WITH_WINDOWS'] = True
+            save_config()
+            return True
+    else:
+        success = disable_startup()
+        if success:
+            config_data['START_WITH_WINDOWS'] = False
+            save_config()
+            return True
+    return False
 
 # ————— Funciones de pruebas de conexión —————
 def test_ping(ip, timeout=5):
@@ -559,6 +662,13 @@ class SyncBioApp:
         # Cargar configuración
         load_config()
         
+        # Verificar y sincronizar el estado del inicio automático con Windows
+        startup_enabled = is_startup_enabled()
+        if startup_enabled != config_data.get('START_WITH_WINDOWS', False):
+            config_data['START_WITH_WINDOWS'] = startup_enabled
+            save_config()
+            logging.info(f"STARTUP: Estado de inicio automatico sincronizado: {startup_enabled}")
+        
         self.setup_ui()
         self.setup_tray()
         
@@ -715,6 +825,16 @@ class SyncBioApp:
                                         variable=self.minimize_tray_var)
         minimize_check.pack(side=tk.LEFT, padx=(20, 0))
         
+        # Segunda fila de opciones
+        options_frame2 = ttk.Frame(config_frame)
+        options_frame2.pack(fill=tk.X, pady=5)
+        
+        self.start_with_windows_var = tk.BooleanVar(value=config_data.get('START_WITH_WINDOWS', False))
+        start_windows_check = ttk.Checkbutton(options_frame2, text="Iniciar con Windows (arranque automático)", 
+                                            variable=self.start_with_windows_var,
+                                            command=self.toggle_windows_startup)
+        start_windows_check.pack(side=tk.LEFT)
+        
         # Botones de configuración
         config_buttons_frame = ttk.Frame(config_frame)
         config_buttons_frame.pack(fill=tk.X, pady=10)
@@ -867,6 +987,7 @@ class SyncBioApp:
             config_data['SERVER_URL'] = self.server_var.get().strip()
             config_data['AUTO_START'] = self.auto_start_var.get()
             config_data['MINIMIZE_TO_TRAY'] = self.minimize_tray_var.get()
+            config_data['START_WITH_WINDOWS'] = self.start_with_windows_var.get()
             return True
         except ValueError as e:
             messagebox.showerror("Error", f"Error en la configuración: {e}")
@@ -888,6 +1009,7 @@ class SyncBioApp:
         self.server_var.set(config_data.get('SERVER_URL', DEFAULT_CONFIG['SERVER_URL']))
         self.auto_start_var.set(config_data.get('AUTO_START', False))
         self.minimize_tray_var.set(config_data.get('MINIMIZE_TO_TRAY', True))
+        self.start_with_windows_var.set(config_data.get('START_WITH_WINDOWS', False))
         messagebox.showinfo("Éxito", "Configuración cargada correctamente")
     
     def export_config(self):
@@ -1087,6 +1209,47 @@ class SyncBioApp:
                 ))
         
         threading.Thread(target=manual_worker, daemon=True).start()
+    
+    def toggle_windows_startup(self):
+        """Configura o desconfigura el inicio automático con Windows"""
+        try:
+            enable = self.start_with_windows_var.get()
+            
+            if enable:
+                # Habilitar inicio automático
+                success = enable_startup()
+                if success:
+                    logging.info("STARTUP: Inicio automatico con Windows habilitado")
+                    messagebox.showinfo("Inicio Automático", 
+                        "La aplicación se configuró para iniciarse automáticamente con Windows.\n\n"
+                        "La aplicación se ejecutará cada vez que inicies el sistema.")
+                else:
+                    logging.error("ERROR: No se pudo habilitar el inicio automatico")
+                    messagebox.showerror("Error", 
+                        "No se pudo configurar el inicio automático.\n\n"
+                        "Verifica que tengas permisos para modificar el registro de Windows.")
+                    # Revertir el checkbox si falló
+                    self.start_with_windows_var.set(False)
+            else:
+                # Deshabilitar inicio automático
+                success = disable_startup()
+                if success:
+                    logging.info("STARTUP: Inicio automatico con Windows deshabilitado")
+                    messagebox.showinfo("Inicio Automático", 
+                        "El inicio automático con Windows ha sido deshabilitado.")
+                else:
+                    logging.error("ERROR: No se pudo deshabilitar el inicio automatico")
+                    messagebox.showerror("Error", 
+                        "No se pudo deshabilitar el inicio automático.\n\n"
+                        "Verifica que tengas permisos para modificar el registro de Windows.")
+                    # Revertir el checkbox si falló
+                    self.start_with_windows_var.set(True)
+                    
+        except Exception as e:
+            logging.error(f"ERROR: Error configurando inicio automatico: {e}")
+            messagebox.showerror("Error", f"Error configurando inicio automático:\n{e}")
+            # Revertir el checkbox si hubo error
+            self.start_with_windows_var.set(not self.start_with_windows_var.get())
     
     def start_sync(self):
         """Inicia la sincronización automática"""
@@ -1432,6 +1595,12 @@ class SyncBioApp:
 # ————— Ejecución principal —————
 if __name__ == '__main__':
     try:
+        # Verificar parámetros de línea de comandos
+        autostart_mode = '--autostart' in sys.argv
+        
+        if autostart_mode:
+            logging.info("STARTUP: Aplicacion iniciada desde arranque automatico de Windows")
+        
         # Verificar si ya hay una instancia corriendo
         import tempfile
         
@@ -1461,16 +1630,32 @@ if __name__ == '__main__':
                 fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                 
         except (IOError, OSError):
-            messagebox.showwarning("Aplicación ya ejecutándose", 
-                "Ya hay una instancia de la aplicación ejecutándose.\n\n"
-                "Busca el icono en la bandeja del sistema o cierra la aplicación anterior.")
+            if not autostart_mode:
+                messagebox.showwarning("Aplicación ya ejecutándose", 
+                    "Ya hay una instancia de la aplicación ejecutándose.\n\n"
+                    "Busca el icono en la bandeja del sistema o cierra la aplicación anterior.")
             sys.exit(1)
         
         # Crear y ejecutar la aplicación
         root = tk.Tk()
         app = SyncBioApp(root)
         
-        logging.info("🖥️ Interfaz gráfica iniciada")
+        # Si se inició desde Windows startup, configurar comportamiento especial
+        if autostart_mode:
+            # Actualizar configuración para indicar que estamos en modo autostart
+            config_data['_autostart_mode'] = True
+            
+            # Iniciar sincronización automáticamente si está configurado
+            if config_data.get('AUTO_START', False):
+                logging.info("STARTUP: Iniciando sincronizacion automatica desde arranque de Windows")
+                root.after(2000, app.start_sync)  # Iniciar después de 2 segundos
+            
+            # Minimizar a bandeja automáticamente
+            if config_data.get('MINIMIZE_TO_TRAY', True):
+                logging.info("STARTUP: Minimizando a bandeja del sistema")
+                root.after(3000, app.hide_window)  # Minimizar después de 3 segundos
+        
+        logging.info("SYSTEM: Interfaz grafica iniciada")
         
         # Ejecutar la aplicación
         root.mainloop()

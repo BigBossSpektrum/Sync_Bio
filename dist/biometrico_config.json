@@ -3,8 +3,8 @@
   "TOKEN_API": null,
   "IP_BIOMETRICO": "192.168.0.88",
   "PUERTO_BIOMETRICO": 4370,
-  "NOMBRE_ESTACION": "Centenario",
-  "INTERVALO_MINUTOS": 5,
-  "AUTO_START": false,
+  "NOMBRE_ESTACION": "Principal",
+  "INTERVALO_MINUTOS": 2,
+  "AUTO_START": true,
   "MINIMIZE_TO_TRAY": true
 }
