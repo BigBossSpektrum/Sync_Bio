@@ -1,0 +1,27 @@
+{
+  "compilacion": {
+    "fecha": "2025-08-23T10:58:09.755233",
+    "sistema": "nt",
+    "python_version": "3.12.2",
+    "directorio": "C:\\Users\\Entrecables y Redes\\Documents\\GitHub\\Sync_Bio"
+  },
+  "ejecutables": [
+    {
+      "nombre": "StartupManager.exe",
+      "ruta": "C:\\Users\\Entrecables y Redes\\Documents\\GitHub\\Sync_Bio\\dist\\StartupManager.exe",
+      "tamaño_mb": 17.9,
+      "fecha_creacion": "2025-08-23T10:58:09.631273"
+    }
+  ],
+  "instrucciones": {
+    "SincronizadorBiometrico.exe": "Aplicación principal con interfaz gráfica",
+    "StartupManager.exe": "Herramienta de línea de comandos para gestionar inicio automático",
+    "InstaladorSincronizadorBiometrico.exe": "Instalador completo para distribución"
+  },
+  "comandos_utiles": {
+    "habilitar_startup": "StartupManager.exe --enable",
+    "deshabilitar_startup": "StartupManager.exe --disable",
+    "ver_estado_startup": "StartupManager.exe --status",
+    "probar_startup": "StartupManager.exe --test"
+  }
+}

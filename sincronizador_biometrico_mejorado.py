@@ -108,32 +108,122 @@ DEFAULT_CONFIG = {
 config_data = DEFAULT_CONFIG.copy()
 config_data['sync_running'] = False
 
-# ————— Funciones de configuración —————
+# ————— Funciones de configuración mejoradas —————
+def get_config_path():
+    """Obtiene la ruta del archivo de configuración de manera robusta"""
+    # Prioridades de búsqueda:
+    # 1. Directorio actual de trabajo
+    # 2. Directorio del script actual
+    # 3. Directorio del ejecutable (si es ejecutable compilado)
+    # 4. Directorio AppData del usuario
+    
+    config_paths = []
+    
+    # 1. Directorio actual
+    config_paths.append(os.path.join(os.getcwd(), 'biometrico_config.json'))
+    
+    # 2. Directorio del script
+    if hasattr(sys, '_MEIPASS'):
+        # Si es ejecutable compilado con PyInstaller
+        app_dir = os.path.dirname(sys.executable)
+    else:
+        # Si es script Python
+        app_dir = os.path.dirname(os.path.abspath(__file__))
+    config_paths.append(os.path.join(app_dir, 'biometrico_config.json'))
+    
+    # 3. AppData del usuario (Windows) o directorio home (Unix)
+    if os.name == 'nt':  # Windows
+        appdata_dir = os.path.expanduser('~\\AppData\\Local\\SyncBio')
+    else:  # Unix/Linux
+        appdata_dir = os.path.expanduser('~/.config/syncbio')
+    
+    os.makedirs(appdata_dir, exist_ok=True)
+    config_paths.append(os.path.join(appdata_dir, 'biometrico_config.json'))
+    
+    return config_paths
+
 def load_config():
-    """Carga la configuración desde archivo"""
+    """Carga la configuración desde archivo con búsqueda robusta"""
     try:
-        if os.path.exists('biometrico_config.json'):
-            with open('biometrico_config.json', 'r', encoding='utf-8') as f:
-                loaded_config = json.load(f)
-                config_data.update(loaded_config)
-                logging.info("CONFIG: Configuracion cargada desde archivo")
-        else:
-            logging.info("CONFIG: Usando configuracion por defecto")
+        config_paths = get_config_path()
+        
+        for config_path in config_paths:
+            if os.path.exists(config_path):
+                try:
+                    with open(config_path, 'r', encoding='utf-8') as f:
+                        loaded_config = json.load(f)
+                        config_data.update(loaded_config)
+                        logging.info(f"CONFIG: Configuracion cargada desde: {config_path}")
+                        return
+                except Exception as e:
+                    logging.warning(f"CONFIG: Error leyendo {config_path}: {e}")
+                    continue
+        
+        # Si no se encontró configuración, crear una por defecto
+        logging.info("CONFIG: No se encontro configuracion existente, usando valores por defecto")
+        save_config()  # Crear archivo de configuración por defecto
+        
     except Exception as e:
         logging.error(f"ERROR: Error cargando configuracion: {e}")
 
 def save_config():
-    """Guarda la configuración actual en archivo"""
+    """Guarda la configuración actual en archivo con gestión robusta"""
     try:
         # Crear una copia sin datos temporales
         config_to_save = {k: v for k, v in config_data.items() 
-                         if k not in ['sync_running']}
+                         if k not in ['sync_running', '_autostart_mode']}
         
-        with open('biometrico_config.json', 'w', encoding='utf-8') as f:
-            json.dump(config_to_save, f, indent=2, ensure_ascii=False)
-        logging.info("CONFIG: Configuracion guardada")
+        config_paths = get_config_path()
+        
+        # Intentar guardar en el primer directorio accesible
+        for config_path in config_paths:
+            try:
+                # Asegurar que el directorio existe
+                os.makedirs(os.path.dirname(config_path), exist_ok=True)
+                
+                # Crear un archivo temporal primero para evitar corrupción
+                temp_config_path = config_path + '.tmp'
+                
+                with open(temp_config_path, 'w', encoding='utf-8') as f:
+                    json.dump(config_to_save, f, indent=2, ensure_ascii=False)
+                
+                # Si la escritura fue exitosa, reemplazar el archivo original
+                if os.path.exists(temp_config_path):
+                    if os.path.exists(config_path):
+                        os.remove(config_path)
+                    os.rename(temp_config_path, config_path)
+                
+                logging.info(f"CONFIG: Configuracion guardada exitosamente en: {config_path}")
+                return True
+                
+            except Exception as e:
+                logging.warning(f"CONFIG: No se pudo guardar en {config_path}: {e}")
+                # Limpiar archivo temporal si existe
+                temp_config_path = config_path + '.tmp'
+                if os.path.exists(temp_config_path):
+                    try:
+                        os.remove(temp_config_path)
+                    except:
+                        pass
+                continue
+        
+        # Si no se pudo guardar en ningún lado
+        logging.error("CONFIG: No se pudo guardar la configuracion en ninguna ubicacion")
+        return False
+        
     except Exception as e:
         logging.error(f"ERROR: Error guardando configuracion: {e}")
+        return False
+
+def auto_save_config():
+    """Guarda la configuración automáticamente en segundo plano"""
+    try:
+        if save_config():
+            logging.debug("CONFIG: Auto-guardado exitoso")
+        else:
+            logging.warning("CONFIG: Fallo en auto-guardado")
+    except Exception as e:
+        logging.error(f"ERROR: Error en auto-guardado: {e}")
 
 # ————— Funciones de inicio automático con Windows —————
 def get_app_executable_path():
@@ -149,6 +239,46 @@ def get_app_executable_path():
 
 def is_startup_enabled():
     """Verifica si el inicio automático está habilitado en Windows"""
+    # Primero intentar con el registro (más confiable y no requiere admin)
+    registry_result = is_startup_enabled_registry()
+    if registry_result:
+        return True
+    
+    # Si no está en el registro, intentar verificar tareas programadas
+    try:
+        import subprocess
+        task_name = "SincronizadorBiometrico"
+        
+        # Verificar si la tarea existe usando schtasks
+        result = subprocess.run([
+            'schtasks', '/query', '/tn', task_name
+        ], capture_output=True, text=True, shell=True)
+        
+        if result.returncode == 0:
+            # La tarea existe, verificar si está habilitada
+            # Usar formato CSV para parsear más fácilmente
+            result_csv = subprocess.run([
+                'schtasks', '/query', '/tn', task_name, '/fo', 'csv'
+            ], capture_output=True, text=True, shell=True)
+            
+            if result_csv.returncode == 0:
+                lines = result_csv.stdout.strip().split('\n')
+                if len(lines) >= 2:
+                    # La segunda línea contiene los datos
+                    data = lines[1].split(',')
+                    if len(data) >= 4:
+                        # El cuarto campo es el estado (Ready, Running, Disabled)
+                        status = data[3].strip('"')
+                        return status.lower() in ['ready', 'running']
+        
+        return False
+        
+    except Exception as e:
+        logging.warning(f"WARNING: Error verificando tarea programada: {e}")
+        return False
+
+def is_startup_enabled_registry():
+    """Método de fallback: verifica el startup usando el registro de Windows"""
     try:
         import winreg
         key_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
@@ -159,19 +289,148 @@ def is_startup_enabled():
             value, _ = winreg.QueryValueEx(key, app_name)
             winreg.CloseKey(key)
             
-            # Verificar si la ruta coincide con la aplicación actual
-            current_path = get_app_executable_path()
-            return value.strip('"') == current_path.strip('"')
+            # Si existe la entrada y contiene contenido relevante
+            if value and len(value.strip()) > 0:
+                # Verificar que la entrada contiene referencias al script actual
+                current_script = os.path.abspath(__file__)
+                current_executable = sys.executable
+                
+                # La entrada debe contener alguna referencia al script o ejecutable actual
+                if (current_script.lower() in value.lower() or 
+                    current_executable.lower() in value.lower() or
+                    "sincronizador" in value.lower()):
+                    logging.info(f"STARTUP: Entrada válida encontrada en registro: {value}")
+                    return True
+                else:
+                    logging.warning(f"STARTUP: Entrada obsoleta en registro: {value}")
+                    return False
+            else:
+                return False
+                
         except FileNotFoundError:
+            logging.debug("STARTUP: No hay entrada en el registro")
             return False
-        except WindowsError:
+        except WindowsError as e:
+            logging.warning(f"WARNING: Error accediendo al registro: {e}")
             return False
     except ImportError:
         logging.warning("WARNING: winreg no disponible - funcionalidad de inicio automatico limitada")
         return False
+    except Exception as e:
+        logging.error(f"ERROR: Error verificando registro: {e}")
+        return False
 
 def enable_startup():
-    """Habilita el inicio automático en Windows"""
+    """Habilita el inicio automático en Windows usando el Programador de Tareas"""
+    try:
+        import subprocess
+        import tempfile
+        task_name = "SincronizadorBiometrico"
+        working_dir = os.path.dirname(os.path.abspath(__file__))
+        
+        # Primero, eliminar la tarea si ya existe
+        subprocess.run([
+            'schtasks', '/delete', '/tn', task_name, '/f'
+        ], capture_output=True, shell=True)
+        
+        # Crear archivo XML temporal para la tarea
+        if getattr(sys, 'frozen', False):
+            # Ejecutable compilado
+            program = sys.executable
+            arguments = '--autostart'
+        else:
+            # Script Python
+            program = sys.executable
+            script_path = os.path.abspath(__file__)
+            arguments = f'"{script_path}" --autostart'
+        
+        # Crear XML para la tarea con configuración mejorada
+        xml_content = f'''<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>Sincronizador Biométrico - Inicio automático</Description>
+    <Author>{os.getenv('USERNAME', 'Usuario')}</Author>
+  </RegistrationInfo>
+  <Triggers>
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+      <Delay>PT30S</Delay>
+      <UserId>{os.getenv('USERDOMAIN', '')}\\{os.getenv('USERNAME', '')}</UserId>
+    </LogonTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>{os.getenv('USERDOMAIN', '')}\\{os.getenv('USERNAME', '')}</UserId>
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>{program}</Command>
+      <Arguments>{arguments}</Arguments>
+      <WorkingDirectory>{working_dir}</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>'''
+        
+        # Escribir archivo XML temporal
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.xml', delete=False, encoding='utf-16') as f:
+            f.write(xml_content)
+            xml_file = f.name
+        
+        try:
+            # Crear la tarea usando el archivo XML
+            cmd = ['schtasks', '/create', '/tn', task_name, '/xml', xml_file, '/f']
+            
+            logging.info(f"STARTUP: Creando tarea programada con XML")
+            logging.info(f"STARTUP: Programa: {program}")
+            logging.info(f"STARTUP: Argumentos: {arguments}")
+            logging.info(f"STARTUP: Directorio: {working_dir}")
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, shell=True)
+            
+            if result.returncode == 0:
+                logging.info("STARTUP: Tarea programada creada exitosamente")
+                return True
+            else:
+                logging.error(f"STARTUP: Error creando tarea programada: {result.stderr}")
+                # Intentar método de fallback (registro)
+                return enable_startup_registry()
+                
+        finally:
+            # Limpiar archivo XML temporal
+            try:
+                os.unlink(xml_file)
+            except:
+                pass
+            
+    except Exception as e:
+        logging.error(f"ERROR: Error habilitando inicio automatico con tareas programadas: {e}")
+        # Intentar método de fallback (registro)
+        return enable_startup_registry()
+
+def enable_startup_registry():
+    """Método de fallback: habilita el inicio automático usando el registro de Windows"""
     try:
         import winreg
         key_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
@@ -187,7 +446,7 @@ def enable_startup():
         winreg.SetValueEx(key, app_name, 0, winreg.REG_SZ, app_path)
         winreg.CloseKey(key)
         
-        logging.info("STARTUP: Inicio automatico habilitado en Windows")
+        logging.info("STARTUP: Inicio automatico habilitado en Windows (registro)")
         return True
     except ImportError:
         logging.error("ERROR: winreg no disponible - no se puede configurar inicio automatico")
@@ -199,6 +458,39 @@ def enable_startup():
 def disable_startup():
     """Deshabilita el inicio automático en Windows"""
     try:
+        import subprocess
+        task_name = "SincronizadorBiometrico"
+        
+        # Intentar eliminar la tarea programada
+        result = subprocess.run([
+            'schtasks', '/delete', '/tn', task_name, '/f'
+        ], capture_output=True, text=True, shell=True)
+        
+        if result.returncode == 0:
+            logging.info("STARTUP: Tarea programada eliminada exitosamente")
+            task_deleted = True
+        else:
+            logging.info("STARTUP: No se encontró tarea programada para eliminar")
+            task_deleted = False
+        
+        # También limpiar del registro por si acaso
+        registry_cleaned = disable_startup_registry()
+        
+        if task_deleted or registry_cleaned:
+            logging.info("STARTUP: Inicio automatico deshabilitado en Windows")
+            return True
+        else:
+            logging.info("STARTUP: Inicio automatico ya estaba deshabilitado")
+            return True
+            
+    except Exception as e:
+        logging.error(f"ERROR: Error deshabilitando inicio automatico: {e}")
+        # Intentar solo con registro como fallback
+        return disable_startup_registry()
+
+def disable_startup_registry():
+    """Método de fallback: deshabilita el startup usando el registro de Windows"""
+    try:
         import winreg
         key_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
         app_name = "SincronizadorBiometrico"
@@ -206,10 +498,10 @@ def disable_startup():
         key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_WRITE)
         try:
             winreg.DeleteValue(key, app_name)
-            logging.info("STARTUP: Inicio automatico deshabilitado en Windows")
+            logging.info("STARTUP: Inicio automatico deshabilitado en Windows (registro)")
             result = True
         except FileNotFoundError:
-            logging.info("STARTUP: Inicio automatico ya estaba deshabilitado")
+            logging.info("STARTUP: Inicio automatico ya estaba deshabilitado (registro)")
             result = True
         finally:
             winreg.CloseKey(key)
@@ -236,6 +528,46 @@ def toggle_startup(enable):
             save_config()
             return True
     return False
+
+def test_startup_functionality():
+    """Función de prueba para verificar el funcionamiento del startup"""
+    logging.info("🔧 TESTING: Probando funcionalidad de inicio automático")
+    
+    # Verificar estado actual
+    current_status = is_startup_enabled()
+    logging.info(f"🔧 TESTING: Estado actual del startup: {current_status}")
+    
+    # Probar habilitar
+    logging.info("🔧 TESTING: Probando habilitar startup...")
+    enable_result = enable_startup()
+    logging.info(f"🔧 TESTING: Resultado habilitar: {enable_result}")
+    
+    # Verificar que se habilitó
+    enabled_status = is_startup_enabled()
+    logging.info(f"🔧 TESTING: Estado después de habilitar: {enabled_status}")
+    
+    # Probar deshabilitar
+    logging.info("🔧 TESTING: Probando deshabilitar startup...")
+    disable_result = disable_startup()
+    logging.info(f"🔧 TESTING: Resultado deshabilitar: {disable_result}")
+    
+    # Verificar que se deshabilitó
+    disabled_status = is_startup_enabled()
+    logging.info(f"🔧 TESTING: Estado después de deshabilitar: {disabled_status}")
+    
+    # Restaurar estado original si era necesario
+    if current_status:
+        logging.info("🔧 TESTING: Restaurando estado original (habilitado)")
+        enable_startup()
+    
+    logging.info("🔧 TESTING: Prueba de funcionalidad completada")
+    return {
+        'initial_status': current_status,
+        'enable_result': enable_result,
+        'enabled_status': enabled_status,
+        'disable_result': disable_result,
+        'disabled_status': disabled_status
+    }
 
 # ————— Funciones de pruebas de conexión —————
 def test_ping(ip, timeout=5):
@@ -672,9 +1004,27 @@ class SyncBioApp:
         self.setup_ui()
         self.setup_tray()
         
+        # Configurar guardado automático periódico (cada 5 minutos)
+        self.schedule_auto_save()
+        
         # Auto-iniciar si está configurado
         if config_data.get('AUTO_START', False):
             self.root.after(1000, self.start_sync)  # Iniciar después de 1 segundo
+    
+    def schedule_auto_save(self):
+        """Programa el auto-guardado periódico de configuración"""
+        def periodic_auto_save():
+            try:
+                auto_save_config()
+                logging.debug("CONFIG: Auto-guardado periódico ejecutado")
+            except Exception as e:
+                logging.warning(f"WARNING: Error en auto-guardado periódico: {e}")
+            finally:
+                # Reprogramar para dentro de 5 minutos (300000 ms)
+                self.root.after(300000, periodic_auto_save)
+        
+        # Iniciar el primer auto-guardado en 5 minutos
+        self.root.after(300000, periodic_auto_save)
     
     def setup_tray(self):
         """Configura el icono de la bandeja del sistema"""
@@ -725,16 +1075,39 @@ class SyncBioApp:
         if config_data['sync_running']:
             self.stop_sync()
     
+    def schedule_auto_save(self):
+        """Programa guardado automático periódico de la configuración"""
+        try:
+            save_config()
+            logging.debug("CONFIG: Guardado automatico periodico completado")
+        except Exception as e:
+            logging.error(f"ERROR: Error en guardado automatico: {e}")
+        
+        # Reprogramar para dentro de 5 minutos (300000 ms)
+        self.root.after(300000, self.schedule_auto_save)
+    
     def quit_app(self, icon=None, item=None):
         """Cierra completamente la aplicación"""
-        if config_data['sync_running']:
-            self.stop_sync()
-        
-        if self.tray_icon:
-            self.tray_icon.stop()
-        
-        self.root.quit()
-        self.root.destroy()
+        try:
+            # Parar sincronización si está corriendo
+            if config_data['sync_running']:
+                self.stop_sync()
+            
+            # Guardar configuración antes de salir
+            save_config()
+            logging.info("SYSTEM: Configuracion guardada antes de salir")
+            
+            # Cerrar icono de bandeja
+            if self.tray_icon:
+                self.tray_icon.stop()
+            
+            self.root.quit()
+            self.root.destroy()
+            
+        except Exception as e:
+            logging.error(f"ERROR: Error durante el cierre de la aplicación: {e}")
+            self.root.quit()
+            self.root.destroy()
     
     def on_closing(self):
         """Maneja el cierre de la ventana principal"""
@@ -903,6 +1276,25 @@ class SyncBioApp:
                                      font=("Arial", 11, "bold"))
         self.status_label.pack()
         
+        # Frame de herramientas de desarrollo
+        dev_frame = ttk.LabelFrame(main_frame, text="Herramientas de Desarrollo", padding="10")
+        dev_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        dev_buttons_frame = ttk.Frame(dev_frame)
+        dev_buttons_frame.pack(fill=tk.X)
+        
+        self.compile_button = ttk.Button(dev_buttons_frame, text="Compilar a EXE", 
+                                        command=self.open_compile_dialog)
+        self.compile_button.pack(side=tk.LEFT, padx=(0, 10))
+        
+        self.startup_manager_button = ttk.Button(dev_buttons_frame, text="Gestor de Startup", 
+                                               command=self.open_startup_manager)
+        self.startup_manager_button.pack(side=tk.LEFT, padx=(0, 10))
+        
+        self.open_project_button = ttk.Button(dev_buttons_frame, text="Abrir Proyecto", 
+                                            command=self.open_project_folder)
+        self.open_project_button.pack(side=tk.LEFT)
+        
         # Log de actividades
         log_frame = ttk.LabelFrame(main_frame, text="Log de Actividades", padding="10")
         log_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
@@ -988,6 +1380,10 @@ class SyncBioApp:
             config_data['AUTO_START'] = self.auto_start_var.get()
             config_data['MINIMIZE_TO_TRAY'] = self.minimize_tray_var.get()
             config_data['START_WITH_WINDOWS'] = self.start_with_windows_var.get()
+            
+            # Auto-guardar inmediatamente después de actualizar
+            auto_save_config()
+            
             return True
         except ValueError as e:
             messagebox.showerror("Error", f"Error en la configuración: {e}")
@@ -1214,12 +1610,15 @@ class SyncBioApp:
         """Configura o desconfigura el inicio automático con Windows"""
         try:
             enable = self.start_with_windows_var.get()
+            logging.info(f"STARTUP: Intentando {'habilitar' if enable else 'deshabilitar'} inicio automatico")
             
             if enable:
                 # Habilitar inicio automático
                 success = enable_startup()
                 if success:
-                    logging.info("STARTUP: Inicio automatico con Windows habilitado")
+                    config_data['START_WITH_WINDOWS'] = True
+                    auto_save_config()  # Guardar inmediatamente
+                    logging.info("STARTUP: Inicio automatico con Windows habilitado y guardado")
                     messagebox.showinfo("Inicio Automático", 
                         "La aplicación se configuró para iniciarse automáticamente con Windows.\n\n"
                         "La aplicación se ejecutará cada vez que inicies el sistema.")
@@ -1230,11 +1629,14 @@ class SyncBioApp:
                         "Verifica que tengas permisos para modificar el registro de Windows.")
                     # Revertir el checkbox si falló
                     self.start_with_windows_var.set(False)
+                    config_data['START_WITH_WINDOWS'] = False
             else:
                 # Deshabilitar inicio automático
                 success = disable_startup()
                 if success:
-                    logging.info("STARTUP: Inicio automatico con Windows deshabilitado")
+                    config_data['START_WITH_WINDOWS'] = False
+                    auto_save_config()  # Guardar inmediatamente
+                    logging.info("STARTUP: Inicio automatico con Windows deshabilitado y guardado")
                     messagebox.showinfo("Inicio Automático", 
                         "El inicio automático con Windows ha sido deshabilitado.")
                 else:
@@ -1244,12 +1646,14 @@ class SyncBioApp:
                         "Verifica que tengas permisos para modificar el registro de Windows.")
                     # Revertir el checkbox si falló
                     self.start_with_windows_var.set(True)
+                    config_data['START_WITH_WINDOWS'] = True
                     
         except Exception as e:
             logging.error(f"ERROR: Error configurando inicio automatico: {e}")
             messagebox.showerror("Error", f"Error configurando inicio automático:\n{e}")
             # Revertir el checkbox si hubo error
             self.start_with_windows_var.set(not self.start_with_windows_var.get())
+            config_data['START_WITH_WINDOWS'] = self.start_with_windows_var.get()
     
     def start_sync(self):
         """Inicia la sincronización automática"""
@@ -1591,12 +1995,224 @@ class SyncBioApp:
                 messagebox.showwarning("Carpeta no encontrada", f"La carpeta de logs no existe: {log_dir}")
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo abrir la carpeta de logs: {e}")
+    
+    def open_compile_dialog(self):
+        """Abre un diálogo para compilar el proyecto a EXE"""
+        compile_window = tk.Toplevel(self.root)
+        compile_window.title("Compilar a EXE")
+        compile_window.geometry("600x500")
+        compile_window.resizable(False, False)
+        compile_window.transient(self.root)
+        compile_window.grab_set()
+        
+        # Centrar ventana
+        compile_window.geometry("+%d+%d" % (
+            self.root.winfo_rootx() + 50,
+            self.root.winfo_rooty() + 50
+        ))
+        
+        main_frame = ttk.Frame(compile_window, padding="20")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Título
+        title_label = ttk.Label(main_frame, text="Compilador a Ejecutables", 
+                               font=("Arial", 14, "bold"))
+        title_label.pack(pady=(0, 20))
+        
+        # Opciones de compilación
+        options_frame = ttk.LabelFrame(main_frame, text="Opciones de Compilación", padding="10")
+        options_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        # Variables para opciones
+        self.compile_main_var = tk.BooleanVar(value=True)
+        self.compile_startup_var = tk.BooleanVar(value=True)
+        self.compile_installer_var = tk.BooleanVar(value=False)
+        self.onefile_var = tk.BooleanVar(value=True)
+        self.debug_var = tk.BooleanVar(value=False)
+        self.windowed_var = tk.BooleanVar(value=True)
+        
+        # Checkboxes para componentes
+        ttk.Checkbutton(options_frame, text="Compilar Sincronizador Principal", 
+                       variable=self.compile_main_var).pack(anchor=tk.W, pady=2)
+        ttk.Checkbutton(options_frame, text="Compilar Gestor de Startup", 
+                       variable=self.compile_startup_var).pack(anchor=tk.W, pady=2)
+        ttk.Checkbutton(options_frame, text="Compilar Instalador Completo", 
+                       variable=self.compile_installer_var).pack(anchor=tk.W, pady=2)
+        
+        ttk.Separator(options_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
+        
+        # Opciones avanzadas
+        ttk.Checkbutton(options_frame, text="Un solo archivo (onefile)", 
+                       variable=self.onefile_var).pack(anchor=tk.W, pady=2)
+        ttk.Checkbutton(options_frame, text="Sin ventana de consola (windowed)", 
+                       variable=self.windowed_var).pack(anchor=tk.W, pady=2)
+        ttk.Checkbutton(options_frame, text="Incluir información de debug", 
+                       variable=self.debug_var).pack(anchor=tk.W, pady=2)
+        
+        # Frame de salida
+        output_frame = ttk.LabelFrame(main_frame, text="Salida de Compilación", padding="10")
+        output_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        
+        # Text widget para mostrar output
+        self.compile_output = tk.Text(output_frame, height=15, width=70, font=("Consolas", 8))
+        compile_scrollbar = ttk.Scrollbar(output_frame, orient=tk.VERTICAL, 
+                                         command=self.compile_output.yview)
+        self.compile_output.configure(yscrollcommand=compile_scrollbar.set)
+        
+        self.compile_output.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        compile_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Botones
+        buttons_frame = ttk.Frame(main_frame)
+        buttons_frame.pack(fill=tk.X, pady=(10, 0))
+        
+        self.start_compile_button = ttk.Button(buttons_frame, text="Iniciar Compilación", 
+                                              command=lambda: self.start_compilation(compile_window))
+        self.start_compile_button.pack(side=tk.LEFT, padx=(0, 10))
+        
+        ttk.Button(buttons_frame, text="Abrir Carpeta Dist", 
+                  command=self.open_dist_folder).pack(side=tk.LEFT, padx=(0, 10))
+        
+        ttk.Button(buttons_frame, text="Cerrar", 
+                  command=compile_window.destroy).pack(side=tk.RIGHT)
+    
+    def start_compilation(self, parent_window):
+        """Inicia el proceso de compilación"""
+        # Deshabilitar botón durante compilación
+        self.start_compile_button.config(state="disabled", text="Compilando...")
+        
+        # Limpiar output
+        self.compile_output.delete('1.0', tk.END)
+        
+        def compile_thread():
+            try:
+                # Construir argumentos
+                args = []
+                
+                if self.compile_main_var.get() and not self.compile_startup_var.get() and not self.compile_installer_var.get():
+                    args.append("--main-only")
+                elif self.compile_startup_var.get() and not self.compile_main_var.get() and not self.compile_installer_var.get():
+                    args.append("--startup-only")
+                elif self.compile_installer_var.get() and not self.compile_main_var.get() and not self.compile_startup_var.get():
+                    args.append("--installer-only")
+                
+                if not self.onefile_var.get():
+                    args.append("--onedir")
+                if not self.windowed_var.get():
+                    args.append("--console")
+                if self.debug_var.get():
+                    args.append("--debug")
+                
+                # Mostrar comando que se va a ejecutar
+                self.log_compile_output(f"🔨 Iniciando compilación con argumentos: {' '.join(args)}\n")
+                self.log_compile_output("=" * 60 + "\n")
+                
+                # Ejecutar compilador
+                python_exe = sys.executable.replace("python.exe", "python.exe")
+                if os.path.exists("env/Scripts/python.exe"):
+                    python_exe = "env/Scripts/python.exe"
+                
+                import subprocess
+                cmd = [python_exe, "compilar_sincronizador.py"] + args
+                
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                    universal_newlines=True
+                )
+                
+                # Leer output en tiempo real
+                for line in iter(process.stdout.readline, ''):
+                    self.log_compile_output(line)
+                    parent_window.update()
+                
+                process.wait()
+                
+                if process.returncode == 0:
+                    self.log_compile_output("\n" + "=" * 60 + "\n")
+                    self.log_compile_output("✅ COMPILACIÓN COMPLETADA EXITOSAMENTE\n")
+                    self.log_compile_output("Los ejecutables se encuentran en la carpeta 'dist/'\n")
+                else:
+                    self.log_compile_output("\n" + "=" * 60 + "\n")
+                    self.log_compile_output("❌ ERROR EN LA COMPILACIÓN\n")
+                    self.log_compile_output(f"Código de error: {process.returncode}\n")
+            
+            except Exception as e:
+                self.log_compile_output(f"\n❌ Error durante la compilación: {e}\n")
+            
+            finally:
+                # Rehabilitar botón
+                self.start_compile_button.config(state="normal", text="Iniciar Compilación")
+        
+        # Ejecutar en hilo separado
+        threading.Thread(target=compile_thread, daemon=True).start()
+    
+    def log_compile_output(self, text):
+        """Agregar texto al output de compilación"""
+        self.compile_output.insert(tk.END, text)
+        self.compile_output.see(tk.END)
+        self.compile_output.update()
+    
+    def open_dist_folder(self):
+        """Abre la carpeta dist con los ejecutables"""
+        try:
+            dist_dir = os.path.abspath("dist")
+            if os.path.exists(dist_dir):
+                os.startfile(dist_dir)  # Windows
+            else:
+                messagebox.showwarning("Carpeta no encontrada", 
+                                     f"La carpeta dist no existe: {dist_dir}\nPrimero compile el proyecto.")
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo abrir la carpeta dist: {e}")
+    
+    def open_startup_manager(self):
+        """Abre el gestor de startup en una nueva ventana"""
+        try:
+            python_exe = sys.executable
+            if os.path.exists("env/Scripts/python.exe"):
+                python_exe = "env/Scripts/python.exe"
+            
+            import subprocess
+            subprocess.Popen([python_exe, "startup_manager.py", "--status"], 
+                           creationflags=subprocess.CREATE_NEW_CONSOLE)
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo abrir el gestor de startup: {e}")
+    
+    def open_project_folder(self):
+        """Abre la carpeta del proyecto"""
+        try:
+            project_dir = os.path.abspath(".")
+            os.startfile(project_dir)  # Windows
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo abrir la carpeta del proyecto: {e}")
 
 # ————— Ejecución principal —————
 if __name__ == '__main__':
     try:
+        # Configurar logging primero
+        setup_logging()
+        
+        # Cargar configuración al inicio
+        load_config()
+        
         # Verificar parámetros de línea de comandos
         autostart_mode = '--autostart' in sys.argv
+        test_startup_mode = '--test-startup' in sys.argv
+        
+        # Si es modo de prueba de startup
+        if test_startup_mode:
+            logging.info("🔧 TESTING: Modo de prueba de startup activado")
+            test_results = test_startup_functionality()
+            print("\n" + "="*50)
+            print("RESULTADOS DE LA PRUEBA DE STARTUP")
+            print("="*50)
+            for key, value in test_results.items():
+                print(f"{key}: {value}")
+            print("="*50)
+            sys.exit(0)
         
         if autostart_mode:
             logging.info("STARTUP: Aplicacion iniciada desde arranque automatico de Windows")
@@ -1640,20 +2256,54 @@ if __name__ == '__main__':
         root = tk.Tk()
         app = SyncBioApp(root)
         
+        # Configurar manejador de cierre para guardar configuración
+        def on_closing():
+            """Manejador de cierre de la aplicación"""
+            try:
+                # Guardar configuración antes de cerrar
+                save_config()
+                logging.info("SYSTEM: Configuracion guardada antes de cerrar")
+                
+                # Cerrar aplicación
+                app.quit_app()
+            except Exception as e:
+                logging.error(f"ERROR: Error durante el cierre: {e}")
+                root.destroy()
+        
+        root.protocol("WM_DELETE_WINDOW", on_closing)
+        
         # Si se inició desde Windows startup, configurar comportamiento especial
         if autostart_mode:
+            logging.info("="*60)
+            logging.info("STARTUP: MODO AUTOSTART ACTIVADO")
+            logging.info("="*60)
+            logging.info(f"STARTUP: Configuración actual:")
+            logging.info(f"  - AUTO_START: {config_data.get('AUTO_START', False)}")
+            logging.info(f"  - MINIMIZE_TO_TRAY: {config_data.get('MINIMIZE_TO_TRAY', True)}")
+            logging.info(f"  - START_WITH_WINDOWS: {config_data.get('START_WITH_WINDOWS', False)}")
+            logging.info(f"  - IP_BIOMETRICO: {config_data.get('IP_BIOMETRICO', 'No configurado')}")
+            logging.info(f"  - INTERVALO_MINUTOS: {config_data.get('INTERVALO_MINUTOS', 5)}")
+            
             # Actualizar configuración para indicar que estamos en modo autostart
             config_data['_autostart_mode'] = True
             
             # Iniciar sincronización automáticamente si está configurado
             if config_data.get('AUTO_START', False):
-                logging.info("STARTUP: Iniciando sincronizacion automatica desde arranque de Windows")
-                root.after(2000, app.start_sync)  # Iniciar después de 2 segundos
+                logging.info("STARTUP: ✅ Sincronización automática HABILITADA - iniciando en 3 segundos")
+                root.after(3000, app.start_sync)  # Iniciar después de 3 segundos
+            else:
+                logging.info("STARTUP: ⚠️  Sincronización automática DESHABILITADA")
             
             # Minimizar a bandeja automáticamente
             if config_data.get('MINIMIZE_TO_TRAY', True):
-                logging.info("STARTUP: Minimizando a bandeja del sistema")
-                root.after(3000, app.hide_window)  # Minimizar después de 3 segundos
+                logging.info("STARTUP: ✅ Minimización a bandeja HABILITADA - minimizando en 5 segundos")
+                root.after(5000, app.hide_window)  # Minimizar después de 5 segundos
+            else:
+                logging.info("STARTUP: ⚠️  Minimización a bandeja DESHABILITADA - la ventana permanecerá visible")
+            
+            logging.info("="*60)
+        else:
+            logging.info("NORMAL: Aplicación iniciada en modo normal (no autostart)")
         
         logging.info("SYSTEM: Interfaz grafica iniciada")
         
