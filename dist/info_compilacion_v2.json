@@ -1,0 +1,96 @@
+{
+  "version": "2.0.0.0",
+  "build_date": "2025-09-11",
+  "build_time": "10:31:18",
+  "executable_name": "SincronizadorBiometricoV2.exe",
+  "file_size_bytes": 22574517,
+  "file_size_mb": "21.5 MB",
+  "compiler": "PyInstaller 6.14.2",
+  "python_version": "3.12.2",
+  "source_file": "sincronizador_biometrico_mejorado.py",
+  "spec_file": "SincronizadorBiometricoV2.spec",
+  "improvements": [
+    "Funcionalidad completa de bandeja del sistema",
+    "Icono mejorado con diseño profesional",
+    "Manejo robusto de errores y logging detallado",
+    "Minimización automática a bandeja al cerrar ventana",
+    "Menú contextual completo en bandeja",
+    "Notificaciones del sistema",
+    "Ejecución en hilo separado para bandeja",
+    "Secuencia de inicialización optimizada",
+    "Control completo desde bandeja (mostrar/ocultar/iniciar/detener/salir)",
+    "Botón dedicado 'Minimizar a Bandeja' en interfaz"
+  ],
+  "included_files": [
+    "icono.ico",
+    "requirements.txt",
+    "biometrico_config.json",
+    "instalador_config.json",
+    "SOLUCION_BANDEJA_SISTEMA.md",
+    "test_tray_functionality.py"
+  ],
+  "hidden_imports": [
+    "pystray",
+    "PIL",
+    "PIL.Image",
+    "PIL.ImageDraw",
+    "tkinter",
+    "tkinter.ttk",
+    "tkinter.messagebox",
+    "tkinter.filedialog",
+    "threading",
+    "requests",
+    "json",
+    "logging",
+    "logging.handlers",
+    "zk",
+    "datetime",
+    "socket",
+    "subprocess",
+    "sys",
+    "os",
+    "time",
+    "winreg"
+  ],
+  "features": {
+    "system_tray": true,
+    "auto_minimize": true,
+    "notifications": true,
+    "context_menu": true,
+    "background_execution": true,
+    "windows_startup": true,
+    "config_persistence": true,
+    "biometric_sync": true,
+    "device_connection_tests": true,
+    "logging_system": true,
+    "error_handling": true,
+    "gui_interface": true
+  },
+  "compatibility": {
+    "windows_version": "Windows 11",
+    "architecture": "64-bit",
+    "dependencies_included": true,
+    "standalone_executable": true
+  },
+  "build_info": {
+    "clean_build": true,
+    "upx_compression": true,
+    "console_window": false,
+    "icon_included": true,
+    "version_info_included": true,
+    "digital_signature": false
+  },
+  "testing": {
+    "tray_functionality_tested": true,
+    "standalone_execution_verified": true,
+    "dependencies_bundled": true,
+    "icon_display_confirmed": true
+  },
+  "notes": [
+    "Esta versión V2 incluye todas las correcciones para la funcionalidad de bandeja del sistema",
+    "El ejecutable es completamente independiente y no requiere instalación de Python",
+    "Todas las dependencias están incluidas en el archivo ejecutable",
+    "La funcionalidad de bandeja ha sido completamente probada y es operativa",
+    "El archivo incluye metadatos de versión y información de la empresa"
+  ]
+}

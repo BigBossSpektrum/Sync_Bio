@@ -12,7 +12,6 @@ from zk import ZK
 from datetime import datetime
 import socket
 import subprocess
-import pystray
 from PIL import Image, ImageDraw
 import sys
 
@@ -107,6 +106,7 @@ DEFAULT_CONFIG = {
 # Variables globales
 config_data = DEFAULT_CONFIG.copy()
 config_data['sync_running'] = False
+app = None  # Referencia global a la aplicación para acceso desde funciones
 
 # ————— Funciones de configuración mejoradas —————
 def get_config_path():
@@ -819,12 +819,28 @@ def enviar_datos(data, server_url, token=None):
 
 def main_cycle():
     """Ciclo principal de sincronización"""
+    # Forzar actualización de configuración desde la UI antes de cada ciclo
+    try:
+        if 'app' in globals() and app and hasattr(app, 'update_config_from_ui'):
+            logging.info("CONFIG: Actualizando configuración desde la interfaz...")
+            if app.update_config_from_ui():
+                logging.info("CONFIG: ✅ Configuración actualizada correctamente desde la UI")
+            else:
+                logging.warning("CONFIG: ⚠️ Error al actualizar configuración desde la UI")
+    except Exception as config_error:
+        logging.warning(f"CONFIG: Error al actualizar configuración: {config_error}")
+    
+    # Verificar configuración completa
     if not config_data['IP_BIOMETRICO'] or not config_data['NOMBRE_ESTACION']:
         logging.error("ERROR: Configuración incompleta (falta IP o nombre de estación)")
         return False
 
+    # Logs de configuración actual para verificación
     logging.info(f"INICIO: Iniciando ciclo de sincronización para {config_data['NOMBRE_ESTACION']}")
     logging.info(f"TARGET: Objetivo: {config_data['IP_BIOMETRICO']}:{config_data['PUERTO_BIOMETRICO']}")
+    logging.info(f"SERVER: URL del servidor: {config_data['SERVER_URL']}")
+    logging.info(f"TOKEN: Token API configurado: {'Sí' if config_data.get('TOKEN_API') else 'No'}")
+    logging.info(f"INTERVAL: Intervalo de sincronización: {config_data.get('INTERVALO_MINUTOS', 5)} minutos")
     
     # Verificar conectividad básica
     tcp_success, tcp_msg = test_tcp_port(config_data['IP_BIOMETRICO'], config_data['PUERTO_BIOMETRICO'])
@@ -858,14 +874,16 @@ def main_cycle():
         success = True
         if regs:
             logging.info(f"SEND: Preparando envío de {len(regs)} registros al servidor...")
+            logging.info(f"SEND: 🌐 URL del servidor que se va a usar: {config_data['SERVER_URL']}")
+            logging.info(f"SEND: 🔑 Token API configurado: {'Sí (' + str(len(config_data['TOKEN_API'])) + ' caracteres)' if config_data.get('TOKEN_API') else 'No'}")
             try:
                 success = enviar_datos(regs, config_data['SERVER_URL'], config_data['TOKEN_API'])
                 if success:
-                    logging.info("OK: Envío de datos completado")
+                    logging.info("OK: ✅ Envío de datos completado exitosamente")
                 else:
-                    logging.error("ERROR: Error en el envío de datos")
+                    logging.error("ERROR: ❌ Error en el envío de datos")
             except Exception as send_error:
-                logging.error(f"ERROR: Error enviando datos: {send_error}")
+                logging.error(f"ERROR: ❌ Error enviando datos: {send_error}")
                 success = False
         else:
             logging.info("🟡 No hay datos para enviar en este ciclo")
@@ -969,15 +987,49 @@ def sync_worker():
 # ————— Funciones para bandeja del sistema —————
 def create_tray_icon():
     """Crea un icono para la bandeja del sistema"""
-    # Crear una imagen simple para el icono
-    width = height = 64
-    image = Image.new('RGB', (width, height), 'blue')
-    draw = ImageDraw.Draw(image)
-    
-    # Dibujar un círculo simple
-    draw.ellipse([width//4, height//4, 3*width//4, 3*height//4], fill='white')
-    
-    return image
+    try:
+        # Crear una imagen simple para el icono
+        width = height = 64
+        image = Image.new('RGB', (width, height), (52, 152, 219))  # Azul moderno
+        draw = ImageDraw.Draw(image)
+        
+        # Dibujar un círculo blanco en el centro
+        margin = 8
+        draw.ellipse([margin, margin, width-margin, height-margin], fill=(255, 255, 255))
+        
+        # Dibujar las letras "SB" (Sync Bio) en el centro
+        try:
+            from PIL import ImageFont
+            # Intentar usar una fuente más grande
+            font = ImageFont.load_default()
+        except:
+            font = None
+        
+        # Calcular posición del texto
+        text = "SB"
+        if font:
+            bbox = draw.textbbox((0, 0), text, font=font)
+            text_width = bbox[2] - bbox[0]
+            text_height = bbox[3] - bbox[1]
+        else:
+            text_width = len(text) * 6
+            text_height = 11
+        
+        text_x = (width - text_width) // 2
+        text_y = (height - text_height) // 2
+        
+        draw.text((text_x, text_y), text, fill=(52, 152, 219), font=font)
+        
+        return image
+        
+    except Exception as e:
+        logging.warning(f"WARNING: Error creando icono de bandeja personalizado: {e}")
+        # Crear un icono simple de respaldo
+        width = height = 64
+        image = Image.new('RGB', (width, height), (52, 152, 219))
+        draw = ImageDraw.Draw(image)
+        draw.ellipse([8, 8, 56, 56], fill=(255, 255, 255))
+        return image
 
 class SyncBioApp:
     def __init__(self, root):
@@ -988,8 +1040,10 @@ class SyncBioApp:
         
         self.sync_thread = None
         self.tray_icon = None
+        self.tray_thread = None
         self.hidden = False
         self.watchdog_active = False
+        self.ui_ready = False
         
         # Cargar configuración
         load_config()
@@ -1001,15 +1055,20 @@ class SyncBioApp:
             save_config()
             logging.info(f"STARTUP: Estado de inicio automatico sincronizado: {startup_enabled}")
         
+        # Configurar la UI primero
         self.setup_ui()
-        self.setup_tray()
+        self.ui_ready = True
         
         # Configurar guardado automático periódico (cada 5 minutos)
         self.schedule_auto_save()
         
+        # Configurar bandeja del sistema después de que la UI esté lista
+        # Usar after para programar la configuración de bandeja
+        self.root.after(1000, self.setup_tray)
+        
         # Auto-iniciar si está configurado
         if config_data.get('AUTO_START', False):
-            self.root.after(1000, self.start_sync)  # Iniciar después de 1 segundo
+            self.root.after(2000, self.start_sync)  # Iniciar después de 2 segundos
     
     def schedule_auto_save(self):
         """Programa el auto-guardado periódico de configuración"""
@@ -1027,95 +1086,173 @@ class SyncBioApp:
         self.root.after(300000, periodic_auto_save)
     
     def setup_tray(self):
-        """Configura el icono de la bandeja del sistema"""
-        if config_data.get('MINIMIZE_TO_TRAY', True):
+        """Configura el icono de la bandeja del sistema de manera no bloqueante"""
+        # TEMPORAL: Deshabilitar bandeja del sistema para evitar bloqueos en PyInstaller
+        if False:  # config_data.get('MINIMIZE_TO_TRAY', True):
             try:
-                # Crear menú para la bandeja
-                menu = pystray.Menu(
-                    pystray.MenuItem("Mostrar", self.show_window),
-                    pystray.MenuItem("Ocultar", self.hide_window),
-                    pystray.MenuItem("Iniciar Sync", self.tray_start_sync),
-                    pystray.MenuItem("Detener Sync", self.tray_stop_sync),
-                    pystray.MenuItem("Salir", self.quit_app)
-                )
+                logging.info("TRAY: Configurando icono de bandeja del sistema...")
                 
-                # Crear icono de bandeja
-                self.tray_icon = pystray.Icon(
-                    "sync_bio",
-                    create_tray_icon(),
-                    "Sincronización Biométrica",
-                    menu
-                )
-                
-                # Configurar el comportamiento de cierre de ventana
+                # Configurar el comportamiento de cierre de ventana primero
                 self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
                 
+                # Crear el icono en un hilo separado para evitar bloqueos
+                def create_tray_in_thread():
+                    try:
+                        # Crear menú para la bandeja
+                        menu = pystray.Menu(
+                            pystray.MenuItem("Mostrar", self.show_window),
+                            pystray.MenuItem("Ocultar", self.hide_window),
+                            pystray.MenuItem("Iniciar Sync", self.tray_start_sync),
+                            pystray.MenuItem("Detener Sync", self.tray_stop_sync),
+                            pystray.MenuItem("Salir", self.quit_app)
+                        )
+                        
+                        # Crear icono de bandeja
+                        self.tray_icon = pystray.Icon(
+                            "sync_bio",
+                            create_tray_icon(),
+                            "Sincronización Biométrica",
+                            menu
+                        )
+                        
+                        logging.info("TRAY: Icono de bandeja creado correctamente")
+                        
+                        # Ejecutar el icono de bandeja (esto es bloqueante)
+                        self.tray_icon.run()
+                        
+                    except Exception as e:
+                        logging.error(f"ERROR: Error en hilo de bandeja: {e}")
+                        self.tray_icon = None
+                
+                # Iniciar el hilo de bandeja
+                self.tray_thread = threading.Thread(target=create_tray_in_thread, daemon=True)
+                self.tray_thread.start()
+                
+                # Dar tiempo para que se inicialice
+                time.sleep(0.5)
+                
+                logging.info("TRAY: Hilo de bandeja iniciado correctamente")
+                
             except Exception as e:
-                logging.warning(f"WARNING: No se pudo configurar la bandeja del sistema: {e}")
+                logging.error(f"ERROR: No se pudo configurar la bandeja del sistema: {e}")
                 self.tray_icon = None
+                # Configurar solo el comportamiento de cierre
+                self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        else:
+            logging.info("TRAY: Bandeja del sistema DESHABILITADA para evitar bloqueos en PyInstaller")
+            # Solo configurar el comportamiento de cierre
+            self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+            self.tray_icon = None
     
     def show_window(self, icon=None, item=None):
         """Muestra la ventana principal"""
-        self.root.deiconify()
-        self.root.lift()
-        self.hidden = False
+        try:
+            if self.ui_ready:
+                self.root.deiconify()
+                self.root.lift()
+                self.root.focus_force()
+                self.hidden = False
+                logging.info("TRAY: Ventana mostrada desde bandeja")
+            else:
+                logging.warning("TRAY: UI no está lista para mostrar")
+        except Exception as e:
+            logging.error(f"ERROR: Error mostrando ventana: {e}")
     
     def hide_window(self, icon=None, item=None):
         """Oculta la ventana principal"""
-        self.root.withdraw()
-        self.hidden = True
+        try:
+            if self.ui_ready:
+                self.root.withdraw()
+                self.hidden = True
+                logging.info("TRAY: Ventana ocultada a bandeja")
+            else:
+                logging.warning("TRAY: UI no está lista para ocultar")
+        except Exception as e:
+            logging.error(f"ERROR: Error ocultando ventana: {e}")
     
     def tray_start_sync(self, icon=None, item=None):
         """Inicia sincronización desde la bandeja"""
-        if not config_data['sync_running']:
-            self.start_sync()
+        try:
+            if not config_data['sync_running']:
+                logging.info("TRAY: Iniciando sincronización desde bandeja")
+                self.start_sync()
+        except Exception as e:
+            logging.error(f"ERROR: Error iniciando sync desde bandeja: {e}")
     
     def tray_stop_sync(self, icon=None, item=None):
         """Detiene sincronización desde la bandeja"""
-        if config_data['sync_running']:
-            self.stop_sync()
+        try:
+            if config_data['sync_running']:
+                logging.info("TRAY: Deteniendo sincronización desde bandeja")
+                self.stop_sync()
+        except Exception as e:
+            logging.error(f"ERROR: Error deteniendo sync desde bandeja: {e}")
     
     def schedule_auto_save(self):
-        """Programa guardado automático periódico de la configuración"""
-        try:
-            save_config()
-            logging.debug("CONFIG: Guardado automatico periodico completado")
-        except Exception as e:
-            logging.error(f"ERROR: Error en guardado automatico: {e}")
+        """Programa el auto-guardado periódico de configuración"""
+        def periodic_auto_save():
+            try:
+                auto_save_config()
+                logging.debug("CONFIG: Auto-guardado periódico ejecutado")
+            except Exception as e:
+                logging.warning(f"WARNING: Error en auto-guardado periódico: {e}")
+            finally:
+                # Reprogramar para dentro de 5 minutos (300000 ms)
+                self.root.after(300000, periodic_auto_save)
         
-        # Reprogramar para dentro de 5 minutos (300000 ms)
-        self.root.after(300000, self.schedule_auto_save)
+        # Iniciar el primer auto-guardado en 5 minutos
+        self.root.after(300000, periodic_auto_save)
     
     def quit_app(self, icon=None, item=None):
         """Cierra completamente la aplicación"""
         try:
+            logging.info("SYSTEM: Iniciando cierre de aplicación...")
+            
             # Parar sincronización si está corriendo
             if config_data['sync_running']:
                 self.stop_sync()
+                time.sleep(1)  # Dar tiempo para que se detenga
+            
+            # Parar watchdog
+            self.stop_watchdog()
             
             # Guardar configuración antes de salir
             save_config()
-            logging.info("SYSTEM: Configuracion guardada antes de salir")
+            logging.info("SYSTEM: Configuración guardada antes de salir")
             
             # Cerrar icono de bandeja
             if self.tray_icon:
+                logging.info("TRAY: Cerrando icono de bandeja...")
                 self.tray_icon.stop()
+                self.tray_icon = None
             
+            # Cerrar ventana principal
             self.root.quit()
             self.root.destroy()
+            
+            logging.info("SYSTEM: Aplicación cerrada completamente")
             
         except Exception as e:
             logging.error(f"ERROR: Error durante el cierre de la aplicación: {e}")
-            self.root.quit()
-            self.root.destroy()
+            try:
+                self.root.quit()
+                self.root.destroy()
+            except:
+                pass
     
     def on_closing(self):
         """Maneja el cierre de la ventana principal"""
-        if config_data.get('MINIMIZE_TO_TRAY', True) and self.tray_icon:
-            # Minimizar a bandeja en lugar de cerrar
-            self.hide_window()
-        else:
-            # Cerrar completamente
+        try:
+            if config_data.get('MINIMIZE_TO_TRAY', True) and self.tray_icon:
+                # Minimizar a bandeja en lugar de cerrar
+                logging.info("TRAY: Minimizando a bandeja del sistema...")
+                self.hide_window()
+            else:
+                # Cerrar completamente
+                logging.info("SYSTEM: Cerrando aplicación completamente...")
+                self.quit_app()
+        except Exception as e:
+            logging.error(f"ERROR: Error en cierre de ventana: {e}")
             self.quit_app()
     
     def setup_ui(self):
@@ -1263,7 +1400,7 @@ class SyncBioApp:
                                            command=self.show_diagnostics)
         self.diagnostico_button.pack(side=tk.LEFT, padx=(0, 10))
         
-        self.hide_button = ttk.Button(control_buttons_frame, text="Ocultar en Segundo Plano", 
+        self.hide_button = ttk.Button(control_buttons_frame, text="Minimizar a Bandeja", 
                                      command=self.hide_window)
         self.hide_button.pack(side=tk.LEFT)
         
@@ -2255,22 +2392,6 @@ if __name__ == '__main__':
         # Crear y ejecutar la aplicación
         root = tk.Tk()
         app = SyncBioApp(root)
-        
-        # Configurar manejador de cierre para guardar configuración
-        def on_closing():
-            """Manejador de cierre de la aplicación"""
-            try:
-                # Guardar configuración antes de cerrar
-                save_config()
-                logging.info("SYSTEM: Configuracion guardada antes de cerrar")
-                
-                # Cerrar aplicación
-                app.quit_app()
-            except Exception as e:
-                logging.error(f"ERROR: Error durante el cierre: {e}")
-                root.destroy()
-        
-        root.protocol("WM_DELETE_WINDOW", on_closing)
         
         # Si se inició desde Windows startup, configurar comportamiento especial
         if autostart_mode:
