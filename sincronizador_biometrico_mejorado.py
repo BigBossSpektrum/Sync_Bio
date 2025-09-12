@@ -239,12 +239,11 @@ def get_app_executable_path():
 
 def is_startup_enabled():
     """Verifica si el inicio automático está habilitado en Windows"""
-    # Primero intentar con el registro (más confiable y no requiere admin)
+    # Verificar ambos métodos: registro y tareas programadas
     registry_result = is_startup_enabled_registry()
-    if registry_result:
-        return True
     
-    # Si no está en el registro, intentar verificar tareas programadas
+    # Verificar tareas programadas
+    task_result = False
     try:
         import subprocess
         task_name = "SincronizadorBiometrico"
@@ -266,16 +265,19 @@ def is_startup_enabled():
                 if len(lines) >= 2:
                     # La segunda línea contiene los datos
                     data = lines[1].split(',')
-                    if len(data) >= 4:
-                        # El cuarto campo es el estado (Ready, Running, Disabled)
-                        status = data[3].strip('"')
-                        return status.lower() in ['ready', 'running']
-        
-        return False
+                    if len(data) >= 3:
+                        # El tercer campo es el estado (Ready/Listo, Running, Disabled)
+                        status = data[2].strip('"').lower()
+                        task_result = status in ['ready', 'listo', 'running']
+                        logging.debug(f"STARTUP: Estado de tarea programada: {status} -> {task_result}")
         
     except Exception as e:
         logging.warning(f"WARNING: Error verificando tarea programada: {e}")
-        return False
+    
+    # Retornar True si cualquiera de los dos métodos está habilitado
+    result = registry_result or task_result
+    logging.debug(f"STARTUP: Resultado final - Registro: {registry_result}, Tarea: {task_result}, Total: {result}")
+    return result
 
 def is_startup_enabled_registry():
     """Método de fallback: verifica el startup usando el registro de Windows"""
@@ -907,7 +909,7 @@ def main_cycle():
         
         logging.info("🏁 Ciclo de sincronización completado")
 
-def sync_worker():
+def sync_worker(stop_event=None):
     """Worker que ejecuta la sincronización automática"""
     try:
         logging.info("SYNC: Worker de sincronización iniciado")
@@ -935,19 +937,27 @@ def sync_worker():
                 intervalo = config_data.get('INTERVALO_MINUTOS', 5)
                 logging.info(f"⏱️ Esperando {intervalo} minutos para la siguiente ejecución...")
                 
-                # Dividir la espera en pequeños intervalos para poder detener el hilo
+                # Usar threading.Event para espera interrumpible
                 total_seconds = intervalo * 60
-                for i in range(total_seconds):
-                    if not config_data['sync_running']:
+                if stop_event:
+                    # Esperar usando el event, que puede ser interrumpido
+                    if stop_event.wait(timeout=total_seconds):
+                        # El event fue activado, significa que debemos parar
                         logging.info("🛑 Sincronización detenida durante la espera")
                         return  # Salir del worker completamente
-                    
-                    # Log cada minuto durante la espera
-                    if i > 0 and i % 60 == 0:
-                        remaining_minutes = (total_seconds - i) // 60
-                        logging.info(f"WAIT: Esperando... {remaining_minutes} minutos restantes")
-                    
-                    time.sleep(1)
+                else:
+                    # Fallback al método anterior si no hay stop_event
+                    for i in range(total_seconds):
+                        if not config_data['sync_running']:
+                            logging.info("🛑 Sincronización detenida durante la espera")
+                            return  # Salir del worker completamente
+                        
+                        # Log cada minuto durante la espera
+                        if i > 0 and i % 60 == 0:
+                            remaining_minutes = (total_seconds - i) // 60
+                            logging.info(f"WAIT: Esperando... {remaining_minutes} minutos restantes")
+                        
+                        time.sleep(1)
                 
                 # Si aún está corriendo, ejecutar siguiente ciclo
                 if config_data['sync_running']:
@@ -971,11 +981,17 @@ def sync_worker():
                 logging.exception(f"ERROR: Error inesperado en el bucle principal: {e}")
                 if config_data['sync_running']:
                     logging.info(f"⏱️ Reiniciando en {config_data.get('INTERVALO_MINUTOS', 5)} minutos...")
-                    # Esperar antes de reintentar, pero salir si se detiene
-                    for i in range(config_data.get('INTERVALO_MINUTOS', 5) * 60):
-                        if not config_data['sync_running']:
-                            return
-                        time.sleep(1)
+                    # Esperar antes de reintentar usando stop_event si está disponible
+                    retry_seconds = config_data.get('INTERVALO_MINUTOS', 5) * 60
+                    if stop_event:
+                        if stop_event.wait(timeout=retry_seconds):
+                            return  # Parar si se activó el event
+                    else:
+                        # Fallback al método anterior
+                        for i in range(retry_seconds):
+                            if not config_data['sync_running']:
+                                return
+                            time.sleep(1)
     
     except Exception as fatal_error:
         logging.exception(f"ERROR: Error fatal en worker de sincronización: {fatal_error}")
@@ -1044,6 +1060,7 @@ class SyncBioApp:
         self.hidden = False
         self.watchdog_active = False
         self.ui_ready = False
+        self.stop_event = threading.Event()  # Añadir Event para comunicación entre hilos
         
         # Cargar configuración
         load_config()
@@ -1206,14 +1223,43 @@ class SyncBioApp:
     def quit_app(self, icon=None, item=None):
         """Cierra completamente la aplicación"""
         try:
+            logging.info("SYSTEM: Cerrando aplicación completamente...")
             logging.info("SYSTEM: Iniciando cierre de aplicación...")
             
-            # Parar sincronización si está corriendo
-            if config_data['sync_running']:
-                self.stop_sync()
-                time.sleep(1)  # Dar tiempo para que se detenga
+            # Verificar si la sincronización está corriendo
+            sync_was_running = config_data.get('sync_running', False)
+            thread_is_alive = hasattr(self, 'sync_thread') and self.sync_thread and self.sync_thread.is_alive()
             
-            # Parar watchdog
+            if sync_was_running or thread_is_alive:
+                logging.info("SYSTEM: Deteniendo sincronización antes del cierre...")
+                
+                # Activar stop_event para interrumpir inmediatamente cualquier espera
+                if hasattr(self, 'stop_event'):
+                    self.stop_event.set()
+                    logging.info("SYSTEM: Stop event activado para terminación inmediata")
+                
+                # Solo llamar stop_sync si realmente está corriendo
+                if sync_was_running:
+                    # Detener sincronización sin wait_for_stop thread adicional durante cierre
+                    config_data['sync_running'] = False
+                    self.stop_watchdog()
+                
+                # Esperar a que termine el hilo solo si está vivo
+                if thread_is_alive:
+                    logging.info("SYSTEM: Esperando a que termine el hilo de sincronización...")
+                    self.sync_thread.join(timeout=2.0)  # Reducido a 2 segundos para cierre más rápido
+                    
+                    if self.sync_thread.is_alive():
+                        logging.warning("WARNING: El hilo de sincronización no terminó en el tiempo esperado")
+                        # En este punto, el hilo daemon se cerrará automáticamente al salir del programa
+                    else:
+                        logging.info("OK: Hilo de sincronización terminado correctamente")
+                else:
+                    logging.info("SYSTEM: Hilo de sincronización ya terminado")
+            else:
+                logging.info("SYSTEM: No hay sincronización activa para detener")
+            
+            # Parar watchdog (por si acaso no se hizo arriba)
             self.stop_watchdog()
             
             # Guardar configuración antes de salir
@@ -1223,10 +1269,14 @@ class SyncBioApp:
             # Cerrar icono de bandeja
             if self.tray_icon:
                 logging.info("TRAY: Cerrando icono de bandeja...")
-                self.tray_icon.stop()
-                self.tray_icon = None
+                try:
+                    self.tray_icon.stop()
+                    self.tray_icon = None
+                except Exception as tray_error:
+                    logging.warning(f"WARNING: Error cerrando bandeja: {tray_error}")
             
             # Cerrar ventana principal
+            logging.info("SYSTEM: Cerrando interfaz gráfica...")
             self.root.quit()
             self.root.destroy()
             
@@ -1235,6 +1285,9 @@ class SyncBioApp:
         except Exception as e:
             logging.error(f"ERROR: Error durante el cierre de la aplicación: {e}")
             try:
+                # Intento forzado de cierre
+                if hasattr(self, 'stop_event'):
+                    self.stop_event.set()  # Asegurar que se active el stop event
                 self.root.quit()
                 self.root.destroy()
             except:
@@ -1243,17 +1296,79 @@ class SyncBioApp:
     def on_closing(self):
         """Maneja el cierre de la ventana principal"""
         try:
-            if config_data.get('MINIMIZE_TO_TRAY', True) and self.tray_icon:
-                # Minimizar a bandeja en lugar de cerrar
-                logging.info("TRAY: Minimizando a bandeja del sistema...")
-                self.hide_window()
+            # Verificar si hay sincronización activa
+            sync_running = config_data.get('sync_running', False)
+            thread_alive = hasattr(self, 'sync_thread') and self.sync_thread and self.sync_thread.is_alive()
+            
+            if sync_running or thread_alive:
+                logging.info("SYSTEM: Detectada sincronización activa durante cierre por botón X")
+                
+                # Activar stop_event inmediatamente para acelerar el cierre
+                if hasattr(self, 'stop_event'):
+                    self.stop_event.set()
+                    logging.info("SYSTEM: Stop event activado preventivamente")
+                
+                # Usar after() para evitar bloqueo del main thread
+                def show_dialog():
+                    try:
+                        from tkinter import messagebox
+                        result = messagebox.askyesnocancel(
+                            "Sincronización en progreso",
+                            "La sincronización está ejecutándose.\n\n" + 
+                            "¿Desea detener la sincronización y cerrar la aplicación?\n\n" +
+                            "• Sí: Detener sincronización y cerrar\n" +
+                            "• No: Minimizar a bandeja (si está habilitada)\n" +
+                            "• Cancelar: Continuar con la aplicación"
+                        )
+                        
+                        if result is True:  # Sí - Detener y cerrar
+                            logging.info("SYSTEM: Usuario eligió detener sincronización y cerrar")
+                            self.quit_app()
+                        elif result is False:  # No - Minimizar si está disponible
+                            if config_data.get('MINIMIZE_TO_TRAY', True) and self.tray_icon:
+                                logging.info("SYSTEM: Usuario eligió minimizar a bandeja")
+                                self.hide_window()
+                            else:
+                                logging.info("SYSTEM: Bandeja no disponible, cerrando de todas formas")
+                                self.quit_app()
+                        else:  # Cancelar - No hacer nada
+                            logging.info("SYSTEM: Usuario canceló el cierre")
+                            # Reactivar sync si fue cancelado
+                            if hasattr(self, 'stop_event'):
+                                self.stop_event.clear()
+                            return
+                    except Exception as e:
+                        logging.error(f"ERROR: Error en diálogo de cierre: {e}")
+                        # En caso de error en el diálogo, cerrar directamente
+                        self.quit_app()
+                
+                # Mostrar diálogo después de que el main thread esté libre
+                self.root.after(100, show_dialog)
+                
             else:
-                # Cerrar completamente
-                logging.info("SYSTEM: Cerrando aplicación completamente...")
-                self.quit_app()
+                # No hay sincronización activa, proceder normalmente
+                logging.info("SYSTEM: No hay sincronización activa, procediendo con cierre normal")
+                if config_data.get('MINIMIZE_TO_TRAY', True) and self.tray_icon:
+                    # Minimizar a bandeja en lugar de cerrar
+                    logging.info("TRAY: Minimizando a bandeja del sistema...")
+                    self.hide_window()
+                else:
+                    # Cerrar completamente
+                    logging.info("SYSTEM: Cerrando aplicación completamente...")
+                    self.quit_app()
+                    
         except Exception as e:
             logging.error(f"ERROR: Error en cierre de ventana: {e}")
-            self.quit_app()
+            # En caso de error, forzar cierre inmediatamente
+            logging.info("SYSTEM: Forzando cierre debido a error")
+            try:
+                if hasattr(self, 'stop_event'):
+                    self.stop_event.set()
+                config_data['sync_running'] = False
+                self.root.quit()
+                self.root.destroy()
+            except:
+                pass
     
     def setup_ui(self):
         # Frame principal con scrollbar
@@ -1811,6 +1926,9 @@ class SyncBioApp:
             # Actualizar configuración global
             config_data['sync_running'] = True
             
+            # Reinicializar el stop_event
+            self.stop_event = threading.Event()
+            
             # Actualizar interfaz ANTES de iniciar el hilo
             self.start_button.config(state="disabled")
             self.stop_button.config(state="normal")
@@ -1825,8 +1943,11 @@ class SyncBioApp:
                     # Actualizar estado en la interfaz
                     self.root.after(0, lambda: self.status_var.set(f"Ejecutándose (cada {config_data['INTERVALO_MINUTOS']} min)"))
                     
-                    # Iniciar el worker de sincronización
-                    sync_worker()
+                    # Limpiar el event antes de iniciar
+                    self.stop_event.clear()
+                    
+                    # Iniciar el worker de sincronización pasando el event
+                    sync_worker(self.stop_event)
                     
                 except Exception as e:
                     logging.exception(f"ERROR: Error fatal en worker de inicio: {e}")
@@ -1878,8 +1999,9 @@ class SyncBioApp:
             # Detener watchdog
             self.stop_watchdog()
             
-            # Cambiar el flag para detener el worker
+            # Cambiar el flag para detener el worker y activar event
             config_data['sync_running'] = False
+            self.stop_event.set()  # Señalar al hilo que debe terminar
             
             # Actualizar interfaz inmediatamente
             self.start_button.config(state="normal")
@@ -1892,16 +2014,17 @@ class SyncBioApp:
             def wait_for_stop():
                 """Esperar a que el hilo termine y actualizar interfaz"""
                 try:
-                    # Esperar un momento para que el hilo termine limpiamente
+                    # Esperar a que el hilo termine limpiamente con timeout más corto
                     if hasattr(self, 'sync_thread') and self.sync_thread and self.sync_thread.is_alive():
-                        # Dar tiempo al hilo para que termine naturalmente
-                        for i in range(10):  # Esperar hasta 10 segundos
-                            if not self.sync_thread.is_alive():
-                                break
-                            time.sleep(1)
+                        # Esperar máximo 3 segundos en lugar de 10
+                        self.sync_thread.join(timeout=3.0)
                         
                         if self.sync_thread.is_alive():
                             logging.warning("WARNING: El hilo de sincronización no terminó en el tiempo esperado")
+                            # Nota: No forzamos el cierre del hilo, solo registramos el warning
+                    
+                    # Limpiar el event para próximo uso
+                    self.stop_event.clear()
                     
                     # Actualizar estado final en la interfaz
                     self.root.after(0, lambda: self.status_var.set("Detenido"))
@@ -1918,6 +2041,7 @@ class SyncBioApp:
             logging.exception(f"ERROR: Error deteniendo sincronización: {e}")
             # Asegurar que el estado se actualice
             config_data['sync_running'] = False
+            self.stop_event.set()
             self.start_button.config(state="normal")
             self.stop_button.config(state="disabled")
             self.status_var.set("Detenido (con errores)")

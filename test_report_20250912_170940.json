@@ -1,0 +1,81 @@
+{
+  "timestamp": "2025-09-12T17:09:40.536480",
+  "total_tests": 12,
+  "passed": 11,
+  "failed": 1,
+  "success_rate": 91.66666666666666,
+  "results": [
+    {
+      "test": "1a. Activar AUTO_START",
+      "passed": true,
+      "details": "Se guarda y carga correctamente el valor True",
+      "timestamp": "2025-09-12T17:09:39.226916"
+    },
+    {
+      "test": "1b. Desactivar AUTO_START",
+      "passed": true,
+      "details": "Se guarda y carga correctamente el valor False",
+      "timestamp": "2025-09-12T17:09:39.270444"
+    },
+    {
+      "test": "1c. Persistencia de configuración",
+      "passed": true,
+      "details": "Archivo de configuración encontrado",
+      "timestamp": "2025-09-12T17:09:39.296461"
+    },
+    {
+      "test": "2a. Desactivar MINIMIZE_TO_TRAY",
+      "passed": true,
+      "details": "Se guarda y carga correctamente el valor False",
+      "timestamp": "2025-09-12T17:09:39.485540"
+    },
+    {
+      "test": "2b. Activar MINIMIZE_TO_TRAY",
+      "passed": true,
+      "details": "Se guarda y carga correctamente el valor True",
+      "timestamp": "2025-09-12T17:09:39.513540"
+    },
+    {
+      "test": "2c. Valor por defecto MINIMIZE_TO_TRAY",
+      "passed": true,
+      "details": "Valor por defecto: True",
+      "timestamp": "2025-09-12T17:09:39.513540"
+    },
+    {
+      "test": "3a. Verificar is_startup_enabled()",
+      "passed": true,
+      "details": "Estado actual: False",
+      "timestamp": "2025-09-12T17:09:39.826143"
+    },
+    {
+      "test": "3b. Habilitar startup",
+      "passed": false,
+      "details": "Resultado enable_startup(): True, Estado después: False",
+      "timestamp": "2025-09-12T17:09:40.159348"
+    },
+    {
+      "test": "3c. Deshabilitar startup",
+      "passed": true,
+      "details": "Resultado disable_startup(): True, Estado después: False",
+      "timestamp": "2025-09-12T17:09:40.267879"
+    },
+    {
+      "test": "3d. Sincronización con configuración",
+      "passed": true,
+      "details": "Valor en configuración: True",
+      "timestamp": "2025-09-12T17:09:40.286405"
+    },
+    {
+      "test": "3e. Restaurar estado inicial",
+      "passed": true,
+      "details": "Estado inicial: False, Estado final: False",
+      "timestamp": "2025-09-12T17:09:40.441942"
+    },
+    {
+      "test": "4a. Cambio simultáneo de todas las opciones",
+      "passed": true,
+      "details": "AUTO_START: True, MINIMIZE_TO_TRAY: False, START_WITH_WINDOWS: True",
+      "timestamp": "2025-09-12T17:09:40.492480"
+    }
+  ]
+}
