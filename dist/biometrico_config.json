@@ -7,5 +7,5 @@
   "INTERVALO_MINUTOS": 8,
   "AUTO_START": true,
   "MINIMIZE_TO_TRAY": true,
-  "START_WITH_WINDOWS": false
+  "START_WITH_WINDOWS": true
 }

@@ -731,6 +731,24 @@ def test_device_connection(ip, puerto):
     return results
 
 # ————— Funciones de sincronización (conservadas del script original) —————
+def validar_user_id(user_id):
+    """
+    Valida que el user_id tenga más de 5 dígitos.
+    Retorna True si el user_id es válido (más de 5 dígitos), False en caso contrario.
+    """
+    try:
+        # Convertir user_id a string para verificar longitud
+        user_id_str = str(user_id)
+        
+        # Verificar que solo contenga dígitos y tenga más de 5 caracteres
+        if user_id_str.isdigit() and len(user_id_str) > 5:
+            return True
+        else:
+            return False
+    except Exception as e:
+        logging.warning(f"WARNING: Error validando user_id {user_id}: {e}")
+        return False
+
 def obtener_usuarios(conn):
     try:
         logging.info("USERS: Obteniendo usuarios...")
@@ -768,11 +786,18 @@ def obtener_registros_crudos(conn, nombre_estacion):
         
         logging.info("SYNC: Procesando registros...")
         data = []
+        registros_filtrados = 0  # Contador de registros filtrados
         for i, r in enumerate(registros):
             try:
                 # Verificar progreso cada 10 registros
                 if i > 0 and i % 10 == 0:
                     logging.info(f"SYNC: Procesados {i}/{len(registros)} registros...")
+                
+                # FILTRO: Validar que el user_id tenga más de 5 dígitos
+                if not validar_user_id(r.user_id):
+                    registros_filtrados += 1
+                    logging.debug(f"FILTER: Registro filtrado - user_id '{r.user_id}' tiene menos de 6 dígitos")
+                    continue
                 
                 registro_data = {
                     'user_id': r.user_id,
@@ -792,7 +817,9 @@ def obtener_registros_crudos(conn, nombre_estacion):
                 logging.error(f"ERROR: Error procesando registro {i}: {reg_error}")
                 continue
         
-        logging.info(f"OK: Se procesaron {len(data)} registros correctamente")
+        # Log de resultados del filtrado
+        logging.info(f"FILTER: Se filtraron {registros_filtrados} registros con user_id de menos de 6 dígitos")
+        logging.info(f"OK: Se procesaron {len(data)} registros válidos de {len(registros)} registros totales")
         return data
         
     except Exception as e:
