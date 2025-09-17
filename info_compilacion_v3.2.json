@@ -1,0 +1,33 @@
+{
+  "version": "3.2",
+  "nombre_archivo": "SincronizadorBiometricoV3.2.exe",
+  "fecha_compilacion": "2025-09-17",
+  "tamaño_archivo": "22.5 MB",
+  "cambios_principales": [
+    "Filtro de user_id cambiado de >5 dígitos a >=5 dígitos",
+    "Mejorado mapeo de nombres de usuarios",
+    "Mejor manejo de nombres por defecto Usuario_{id}",
+    "Filtrado mejorado para excluir user_ids con menos de 5 dígitos",
+    "Logging mejorado para seguimiento de filtros y mapeos"
+  ],
+  "funciones_modificadas": [
+    "validar_user_id()",
+    "obtener_registros_crudos()"
+  ],
+  "script_base": "sincronizador_biometrico_mejorado.py",
+  "compilador": "PyInstaller 6.14.2",
+  "python_version": "3.12.2",
+  "flags_compilacion": [
+    "--onefile",
+    "--windowed", 
+    "--noconsole",
+    "--icon=icono.ico",
+    "--add-data icono.ico;."
+  ],
+  "problemas_resueltos": [
+    "User IDs de 5 dígitos ahora son aceptados (antes solo >5)",
+    "Mejor obtención de nombres reales de usuarios del dispositivo",
+    "Reducción de usuarios con nombres por defecto"
+  ],
+  "notas": "Versión compilada exitosamente con mejoras en filtrado y mapeo de usuarios"
+}

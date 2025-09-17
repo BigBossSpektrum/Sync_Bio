@@ -733,15 +733,15 @@ def test_device_connection(ip, puerto):
 # ————— Funciones de sincronización (conservadas del script original) —————
 def validar_user_id(user_id):
     """
-    Valida que el user_id tenga más de 5 dígitos.
-    Retorna True si el user_id es válido (más de 5 dígitos), False en caso contrario.
+    Valida que el user_id tenga 5 o más dígitos.
+    Retorna True si el user_id es válido (5 o más dígitos), False en caso contrario.
     """
     try:
         # Convertir user_id a string para verificar longitud
         user_id_str = str(user_id)
         
-        # Verificar que solo contenga dígitos y tenga más de 5 caracteres
-        if user_id_str.isdigit() and len(user_id_str) > 5:
+        # Verificar que solo contenga dígitos y tenga 5 o más caracteres
+        if user_id_str.isdigit() and len(user_id_str) >= 5:
             return True
         else:
             return False
@@ -787,21 +787,38 @@ def obtener_registros_crudos(conn, nombre_estacion):
         logging.info("SYNC: Procesando registros...")
         data = []
         registros_filtrados = 0  # Contador de registros filtrados
+        registros_con_nombre_defecto = 0  # Contador de registros con nombre por defecto
+        
         for i, r in enumerate(registros):
             try:
                 # Verificar progreso cada 10 registros
                 if i > 0 and i % 10 == 0:
                     logging.info(f"SYNC: Procesados {i}/{len(registros)} registros...")
                 
-                # FILTRO: Validar que el user_id tenga más de 5 dígitos
+                # FILTRO: Validar que el user_id tenga 5 o más dígitos
                 if not validar_user_id(r.user_id):
                     registros_filtrados += 1
-                    logging.debug(f"FILTER: Registro filtrado - user_id '{r.user_id}' tiene menos de 6 dígitos")
+                    logging.debug(f"FILTER: Registro filtrado - user_id '{r.user_id}' tiene menos de 5 dígitos")
                     continue
+                
+                # Obtener el nombre del usuario
+                nombre_usuario = user_map.get(r.user_id)
+                
+                # Si no se encuentra en el mapeo, intentar obtener el nombre del registro mismo
+                if not nombre_usuario:
+                    # Verificar si el registro tiene atributo name
+                    if hasattr(r, 'name') and r.name and r.name.strip():
+                        nombre_usuario = r.name.strip()
+                        logging.debug(f"USER: Nombre obtenido del registro para user_id {r.user_id}: {nombre_usuario}")
+                    else:
+                        # Como último recurso, usar el formato por defecto
+                        nombre_usuario = f"Usuario_{r.user_id}"
+                        registros_con_nombre_defecto += 1
+                        logging.debug(f"USER: Usando nombre por defecto para user_id {r.user_id}")
                 
                 registro_data = {
                     'user_id': r.user_id,
-                    'nombre': user_map.get(r.user_id, f"Usuario_{r.user_id}"),
+                    'nombre': nombre_usuario,
                     'timestamp': r.timestamp.isoformat() if r.timestamp else None,
                     'status': r.status,
                     'estacion': nombre_estacion,
@@ -818,7 +835,8 @@ def obtener_registros_crudos(conn, nombre_estacion):
                 continue
         
         # Log de resultados del filtrado
-        logging.info(f"FILTER: Se filtraron {registros_filtrados} registros con user_id de menos de 6 dígitos")
+        logging.info(f"FILTER: Se filtraron {registros_filtrados} registros con user_id de menos de 5 dígitos")
+        logging.info(f"USER: {registros_con_nombre_defecto} registros usaron nombre por defecto")
         logging.info(f"OK: Se procesaron {len(data)} registros válidos de {len(registros)} registros totales")
         return data
         
