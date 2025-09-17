@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Compilador Integrado para Sincronizador Biométrico
+Compilador Integrado para Sincronizador Bi        archivos_necesarios = [
+            "src/sincronizador_biometrico_mejorado.py",
+            "src/startup_manager.py",
+            "assets/icono.ico",
+            "config/requirements.txt"
+        ]co
 ==================================================
 
 Este script compila el proyecto completo en ejecutables (.exe) incluyendo:
@@ -35,7 +40,7 @@ class CompiladorSincronizador:
         self.directorio_proyecto = Path.cwd()
         self.directorio_dist = self.directorio_proyecto / "dist"
         self.directorio_build = self.directorio_proyecto / "build"
-        self.icono = self.directorio_proyecto / "icono.ico"
+        self.icono = self.directorio_proyecto / "assets" / "icono.ico"
         
         # Detectar rutas del entorno virtual
         self.env_dir = self.directorio_proyecto / "env"
@@ -116,15 +121,43 @@ class CompiladorSincronizador:
         
         for directorio in [self.directorio_dist, self.directorio_build]:
             if directorio.exists():
-                shutil.rmtree(directorio)
-                self.log(f"Eliminado: {directorio}")
+                try:
+                    shutil.rmtree(directorio)
+                    self.log(f"Eliminado: {directorio}")
+                except PermissionError as e:
+                    self.log(f"⚠️ No se pudo eliminar {directorio}: {e}", "WARNING")
+                    self.log("Intentando eliminar archivos individualmente...", "WARNING")
+                    
+                    # Intentar eliminar archivos individualmente
+                    for root, dirs, files in os.walk(directorio, topdown=False):
+                        for file in files:
+                            try:
+                                os.remove(os.path.join(root, file))
+                            except PermissionError:
+                                self.log(f"⚠️ No se pudo eliminar archivo: {file}", "WARNING")
+                        for dir in dirs:
+                            try:
+                                os.rmdir(os.path.join(root, dir))
+                            except (PermissionError, OSError):
+                                pass
+                    
+                    # Intentar crear el directorio limpio
+                    try:
+                        if not directorio.exists():
+                            directorio.mkdir(parents=True)
+                        self.log(f"✅ Directorio preparado: {directorio}")
+                    except Exception:
+                        pass
         
         # Eliminar archivos .spec antiguos
         specs_antiguos = list(self.directorio_proyecto.glob("*.spec"))
         for spec in specs_antiguos:
             if spec.name not in ["instalador_completo.spec"]:  # Preservar el spec del instalador
-                spec.unlink()
-                self.log(f"Eliminado: {spec}")
+                try:
+                    spec.unlink()
+                    self.log(f"Eliminado: {spec}")
+                except PermissionError:
+                    self.log(f"⚠️ No se pudo eliminar {spec}", "WARNING")
     
     def compilar_sincronizador(self, onefile=True, windowed=True, debug=False):
         """Compilar el sincronizador principal"""
@@ -147,8 +180,8 @@ class CompiladorSincronizador:
             cmd += f' --icon="{self.icono}"'
         
         # Agregar archivos de datos
-        cmd += ' --add-data="icono.ico;."'
-        cmd += ' --add-data="requirements.txt;."'
+        cmd += ' --add-data="assets/icono.ico;."'
+        cmd += ' --add-data="config/requirements.txt;."'
         
         configs = ['biometrico_config.json', 'instalador_config.json']
         for config in configs:
@@ -171,7 +204,7 @@ class CompiladorSincronizador:
         for mod in exclude_modules:
             cmd += f' --exclude-module={mod}'
         
-        cmd += ' sincronizador_biometrico_mejorado.py'
+        cmd += ' src/sincronizador_biometrico_mejorado.py'
         
         success = self.ejecutar_comando(cmd, "Compilación del sincronizador principal")
         
@@ -214,7 +247,7 @@ class CompiladorSincronizador:
         for mod in exclude_modules:
             cmd += f' --exclude-module={mod}'
         
-        cmd += ' startup_manager.py'
+        cmd += ' src/startup_manager.py'
         
         success = self.ejecutar_comando(cmd, "Compilación del gestor de startup")
         
@@ -236,8 +269,8 @@ class CompiladorSincronizador:
         self.log("COMPILANDO INSTALADOR COMPLETO")
         self.log("=" * 50)
         
-        if not (self.directorio_proyecto / "instalador_completo.py").exists():
-            self.log("❌ instalador_completo.py no encontrado", "ERROR")
+        if not (self.directorio_proyecto / "src" / "instalador_completo.py").exists():
+            self.log("❌ src/instalador_completo.py no encontrado", "ERROR")
             return False
         
         if not (self.directorio_proyecto / "instalador_completo.spec").exists():

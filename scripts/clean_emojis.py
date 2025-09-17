@@ -54,5 +54,5 @@ def clean_emojis_in_file(file_path):
         return False
 
 if __name__ == "__main__":
-    file_path = "c:\\Users\\Entrecables y Redes\\Documents\\GitHub\\Sync_Bio\\sincronizador_biometrico_mejorado.py"
+    file_path = "c:\\Users\\Entrecables y Redes\\Documents\\GitHub\\Sync_Bio\\src\\sincronizador_biometrico_mejorado.py"
     clean_emojis_in_file(file_path)

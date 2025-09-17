@@ -68,7 +68,7 @@ def setup_logging():
 
 def load_config():
     """Cargar configuración desde archivo JSON"""
-    config_path = "biometrico_config.json"
+    config_path = "../config/biometrico_config.json"
     default_config = {
         "SERVER_URL": "http://186.31.35.24:8000/api/recibir-datos-biometrico/",
         "TOKEN_API": None,

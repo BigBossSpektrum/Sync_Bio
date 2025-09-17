@@ -35,7 +35,7 @@ replacements = [
     ("💡", "INFO:"),
 ]
 
-file_path = r"c:\Users\Entrecables y Redes\Documents\GitHub\Sync_Bio\sincronizador_biometrico_mejorado.py"
+file_path = r"c:\Users\Entrecables y Redes\Documents\GitHub\Sync_Bio\src\sincronizador_biometrico_mejorado.py"
 
 try:
     # Leer el archivo

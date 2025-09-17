@@ -15,7 +15,7 @@ title Sincronizador Biometrico - Iniciando...
 
 REM Obtener directorio del script
 set "SCRIPT_DIR=%~dp0"
-set "PYTHON_SCRIPT=%SCRIPT_DIR%sync_service.py"
+set "PYTHON_SCRIPT=%SCRIPT_DIR%..\src\sync_service.py"
 set "VENV_DIR=%SCRIPT_DIR%env"
 set "PYTHON_EXE=%VENV_DIR%\Scripts\python.exe"
 set "LOG_FILE=%SCRIPT_DIR%sync_service.log"
@@ -87,8 +87,8 @@ if "%STARTUP_MODE%"=="1" (
 
 REM Verificar si existe el script Python
 if not exist "%PYTHON_SCRIPT%" (
-    echo ❌ ERROR: No se encuentra el archivo sync_service.py
-    call :write_log "ERROR: sync_service.py no encontrado"
+    echo ❌ ERROR: No se encuentra el archivo src/sync_service.py
+    call :write_log "ERROR: src/sync_service.py no encontrado"
     if "%STARTUP_MODE%"=="0" pause
     goto :end
 )

@@ -258,8 +258,8 @@ class InstaladorPythonGUI:
             except:
                 pass
         
-        # Buscar requirements.txt
-        req_local = os.path.join(directorio_actual, "requirements.txt")
+        # Buscar ../config/requirements.txt
+        req_local = os.path.join(directorio_actual, "../config/requirements.txt")
         if os.path.exists(req_local):
             self.requirements_path.set(req_local)
             

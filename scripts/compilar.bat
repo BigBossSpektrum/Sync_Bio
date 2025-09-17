@@ -16,7 +16,8 @@ title Compilador Sincronizador Biometrico
 
 REM Obtener directorio del script
 set "SCRIPT_DIR=%~dp0"
-set "PYTHON_EXE=%SCRIPT_DIR%env\Scripts\python.exe"
+set "PROJECT_DIR=%~dp0.."
+set "PYTHON_EXE=%PROJECT_DIR%\env\Scripts\python.exe"
 set "COMPILER_SCRIPT=%SCRIPT_DIR%compilar_sincronizador.py"
 
 echo.
@@ -34,7 +35,7 @@ if not exist "%PYTHON_EXE%" (
     echo 1. Asegurate de que el entorno virtual este creado
     echo 2. O ejecuta: python -m venv env
     echo 3. Y luego: %SCRIPT_DIR%env\Scripts\activate
-    echo 4. Y finalmente: pip install -r requirements.txt
+    echo 4. Y finalmente: pip install -r config/requirements.txt
     echo.
     pause
     exit /b 1

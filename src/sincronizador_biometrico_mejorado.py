@@ -120,7 +120,7 @@ def get_config_path():
     config_paths = []
     
     # 1. Directorio actual
-    config_paths.append(os.path.join(os.getcwd(), 'biometrico_config.json'))
+    config_paths.append(os.path.join(os.getcwd(), '../config/biometrico_config.json'))
     
     # 2. Directorio del script
     if hasattr(sys, '_MEIPASS'):
@@ -129,7 +129,7 @@ def get_config_path():
     else:
         # Si es script Python
         app_dir = os.path.dirname(os.path.abspath(__file__))
-    config_paths.append(os.path.join(app_dir, 'biometrico_config.json'))
+    config_paths.append(os.path.join(app_dir, '../config/biometrico_config.json'))
     
     # 3. AppData del usuario (Windows) o directorio home (Unix)
     if os.name == 'nt':  # Windows

@@ -39,7 +39,7 @@ class InstaladorCompleto:
             sys.exit(0)
         
         # Variables de configuración (definir ANTES de usar)
-        self.config_path = "biometrico_config.json"
+        self.config_path = "../config/biometrico_config.json"
         self.config = self.cargar_configuracion()
         self.lock_file_path = None
         
@@ -869,14 +869,14 @@ class InstaladorCompleto:
     def verificar_dependencias(self):
         """Verificar si las dependencias están instaladas"""
         try:
-            if not os.path.exists("requirements.txt"):
-                self.deps_status.set("✗ Archivo requirements.txt no encontrado")
+            if not os.path.exists("../config/requirements.txt"):
+                self.deps_status.set("✗ Archivo ../config/requirements.txt no encontrado")
                 return False
             
             self.log_message("Verificando dependencias...")
             
-            # Leer requirements.txt
-            with open("requirements.txt", "r", encoding="utf-8") as f:
+            # Leer ../config/requirements.txt
+            with open("../config/requirements.txt", "r", encoding="utf-8") as f:
                 requirements = f.read().strip().split("\n")
             
             missing_packages = []
@@ -923,8 +923,8 @@ class InstaladorCompleto:
                              timeout=120)
                 
                 # Instalar dependencias
-                self.log_message("Instalando dependencias desde requirements.txt...")
-                result = subprocess.run([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"], 
+                self.log_message("Instalando dependencias desde ../config/requirements.txt...")
+                result = subprocess.run([sys.executable, "-m", "pip", "install", "-r", "../config/requirements.txt"], 
                                       capture_output=True, text=True, timeout=600)
                 
                 if result.returncode == 0:

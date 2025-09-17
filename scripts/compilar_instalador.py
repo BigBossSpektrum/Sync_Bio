@@ -36,8 +36,8 @@ def main():
     print("=" * 50)
     
     # Verificar que estamos en el directorio correcto
-    if not os.path.exists("instalador_completo.py"):
-        print("✗ Error: instalador_completo.py no encontrado")
+    if not os.path.exists("src/instalador_completo.py"):
+        print("✗ Error: src/instalador_completo.py no encontrado")
         print("Asegúrate de ejecutar este script desde el directorio del proyecto")
         return False
     
